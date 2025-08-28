@@ -1,0 +1,4 @@
+name: antinomics
+channels:
+  - conda-forge
+prefix: /opt/homebrew/Caskroom/mambaforge/base/envs/antinomics

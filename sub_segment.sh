@@ -93,11 +93,22 @@ for subject_path in "$SUBJECTS_DIR"/*; do
         echo "$(date): Cerebellum parcellation with $mask_option mask completed for subject $subject_id" >> "$log_file"
     done
 
-    
+    # glasser atlas
+    mri_surf2surf --srcsubject fsaverage \
+                --trgsubject $subject_id \
+                --hemi lh \
+                --srcsurfval $SUBJECTS_DIR/fsaverage/label/lh.HCP-MMP1.annot \
+                --trgsurfval $SUBJECTS_DIR/$subject_id/label/lh.HCP-MMP1.annot
+
+    mri_surf2surf --srcsubject fsaverage \
+                --trgsubject $subject_id \
+                --hemi rh \
+                --srcsurfval $SUBJECTS_DIR/fsaverage/label/rh.HCP-MMP1.annot \
+                --trgsurfval $SUBJECTS_DIR/$subject_id/label/rh.HCP-MMP1.annot
 
     # schaefer atlas
     echo -e "\e[32mSchaefer2018 parcellation in individual surface space!"
-    for n in 400 600 800; do
+    for n in 400 800 1000; do
         for net_option in 17; do
             for hemi in "${hemis[@]}"; do
                 mris_ca_label -l $SUBJECTS_DIR/$subject_id/label/${hemi}.cortex.label \
@@ -110,18 +121,4 @@ for subject_path in "$SUBJECTS_DIR"/*; do
             done
         done
     done
-
-    # histo atlas
-    echo -e "\e[32mBayesian Segmentation with Histological Atlas "NextBrain""
-    mkdir $SUBJECTS_DIR/$subject_id/hist
-    mri_histo_atlas_segment_fireants $SUBJECTS_DIR/$subject_id/mri/T1.mgz \
-                                        $SUBJECTS_DIR/$subject_id/hist \
-                                        0 $n_threads
-    echo "$(date): Bayesian segmentation with histological atlas completed for subject $subject_id" >> "$log_file"
-
 done
-
-
-
-
-ls *.nii.gz | parallel --jobs 21 recon-all -s {.} -i {} -all

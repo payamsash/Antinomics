@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Written by Payam S. Shabestari, Zurich, 04.2025
+# Written by Payam S. Shabestari, Zurich, 09.2025
 # email: payam.sadeghishabestari@uzh.ch
 # This script is written mainly for Antinomics project. However It could be used for other purposes.
 
@@ -15,6 +15,7 @@ export PATH=/home/ubuntu/fsl/bin:$PATH
 export PATH=/home/ubuntu/data/src_codes/ants-2.5.4/bin:$PATH
 export ANTSPATH=/home/ubuntu/data/src_codes/ants-2.5.4/bin
 
+## run recon-all in parallel
 smri_path=/home/ubuntu/volume/Antinomics/raws/sMRI_T1
 cd $smri_path
 nohup parallel --jobs 17 'FS_V8_XOPTS=0 recon-all -s {.} -i {} -all' ::: *.nii > recon-all.log 2>&1 &

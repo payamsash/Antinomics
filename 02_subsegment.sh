@@ -5,6 +5,7 @@
 # This script is written mainly for Antinomics project. However It could be used for other purposes.
 
 ## set Paths
+set -euo pipefail
 export FREESURFER_HOME=/usr/local/freesurfer/8.0.0
 export SUBJECTS_DIR=/home/ubuntu/volume/Antinomics/subjects_fs_dir
 export LD_LIBRARY_PATH=$FREESURFER_HOME/MCRv97/runtime/glnxa64:$FREESURFER_HOME/MCRv97/bin/glnxa64:$FREESURFER_HOME/MCRv97/sys/os/glnxa64:$FREESURFER_HOME/MCRv97/extern/bin/glnxa64
@@ -16,25 +17,28 @@ export PATH=/home/ubuntu/fsl/bin:$PATH
 export PATH=/home/ubuntu/data/src_codes/ants-2.5.4/bin:$PATH
 export ANTSPATH=/home/ubuntu/data/src_codes/ants-2.5.4/bin
 
-## set variables
-sch_gcs_dir="$FREESURFER_HOME/gcs"
-n_threads=30
-mask_options=("Tight" "Loose")
-hemis=("lh" "rh")
+subsegment () {
+    local subject_id=$1
+    echo "Processing subject: $subject_id"
 
-## check if all subjects are segmented by recon-all
-echo -e "\e[32mChecking for missing recon-all.done files..."
-for dir in "$SUBJECTS_DIR"/*/; do
-    if [ -d "$dir" ]; then
-        if [ ! -f "$dir/scripts/recon-all.done" ]; then
-        echo "Missing: $(basename "$dir")"
+
+    ## set variables
+    sch_gcs_dir="$FREESURFER_HOME/gcs"
+    n_threads=30
+    mask_options=("Tight" "Loose")
+    hemis=("lh" "rh")
+
+    ## check if all subjects are segmented by recon-all
+    echo -e "\e[32mChecking for missing recon-all.done files..."
+    for dir in "$SUBJECTS_DIR"/*/; do
+        if [ -d "$dir" ]; then
+            if [ ! -f "$dir/scripts/recon-all.done" ]; then
+            echo "Missing: $(basename "$dir")"
+            fi
         fi
-    fi
-done
+    done
 
-## the real part
-for subject_path in "$SUBJECTS_DIR"/*; do
-    subject_id=$(basename "$subject_path")
+    ## the real part
     log_file="$SUBJECTS_DIR/$subject_id/scripts/sub_segmentation.log"
     echo "$(date): Sub segmentation for subject $subject_id has been started." >> "$log_file"
 
@@ -73,7 +77,7 @@ for subject_path in "$SUBJECTS_DIR"/*; do
                     --interp nearest
         echo "$(date): Striatal parcellation with $mask_option mask completed for subject $subject_id" >> "$log_file"
     done
-    
+
     # cerebellum
     echo -e "\e[32mCerebellum parcellation!"
     for mask_option in "${mask_options[@]}"; do
@@ -89,17 +93,20 @@ for subject_path in "$SUBJECTS_DIR"/*; do
     done
 
     # glasser atlas
-    mri_surf2surf --srcsubject fsaverage \
+    mri_surf2surf \
+                --srcsubject fsaverage \
                 --trgsubject $subject_id \
                 --hemi lh \
-                --srcsurfval $SUBJECTS_DIR/fsaverage/label/lh.HCP-MMP1.annot \
-                --trgsurfval $SUBJECTS_DIR/$subject_id/label/lh.HCP-MMP1.annot
+                --sval-annot $SUBJECTS_DIR/fsaverage/label/lh.HCP-MMP1.annot \
+                --tval      $SUBJECTS_DIR/$subject_id/label/lh.HCP-MMP1.annot
 
-    mri_surf2surf --srcsubject fsaverage \
+                # Right hemisphere
+                mri_surf2surf \
+                --srcsubject fsaverage \
                 --trgsubject $subject_id \
                 --hemi rh \
-                --srcsurfval $SUBJECTS_DIR/fsaverage/label/rh.HCP-MMP1.annot \
-                --trgsurfval $SUBJECTS_DIR/$subject_id/label/rh.HCP-MMP1.annot
+                --sval-annot $SUBJECTS_DIR/fsaverage/label/rh.HCP-MMP1.annot \
+                --tval      $SUBJECTS_DIR/$subject_id/label/rh.HCP-MMP1.annot
 
     # schaefer atlas
     echo -e "\e[32mSchaefer2018 parcellation in individual surface space!"
@@ -116,4 +123,12 @@ for subject_path in "$SUBJECTS_DIR"/*; do
             done
         done
     done
+}
+
+## main part
+for subj_dir in "$SUBJECTS_DIR"/*; do
+    if [ -d "$subj_dir" ]; then
+        subject_id=$(basename "$subj_dir")
+        subsegment "$subject_id"
+    fi
 done

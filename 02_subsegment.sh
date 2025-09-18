@@ -5,7 +5,7 @@
 # This script is written mainly for Antinomics project. However It could be used for other purposes.
 
 ## set Paths
-set -euo pipefail
+# set -euo pipefail
 export FREESURFER_HOME=/usr/local/freesurfer/8.0.0
 export SUBJECTS_DIR=/home/ubuntu/volume/Antinomics/subjects_fs_dir
 export LD_LIBRARY_PATH=$FREESURFER_HOME/MCRv97/runtime/glnxa64:$FREESURFER_HOME/MCRv97/bin/glnxa64:$FREESURFER_HOME/MCRv97/sys/os/glnxa64:$FREESURFER_HOME/MCRv97/extern/bin/glnxa64
@@ -111,7 +111,7 @@ subsegment () {
     # schaefer atlas
     echo -e "\e[32mSchaefer2018 parcellation in individual surface space!"
     for n in 400 800 1000; do
-        for net_option in 17; do
+        for net_option in 7 17; do
             for hemi in "${hemis[@]}"; do
                 mris_ca_label -l $SUBJECTS_DIR/$subject_id/label/${hemi}.cortex.label \
                                 $subject_id \
@@ -129,6 +129,8 @@ subsegment () {
 for subj_dir in "$SUBJECTS_DIR"/*; do
     if [ -d "$subj_dir" ]; then
         subject_id=$(basename "$subj_dir")
-        subsegment "$subject_id"
+        if [ "$subject_id" != "fsaverage" ]; then
+            subsegment "$subject_id"
+        fi
     fi
 done

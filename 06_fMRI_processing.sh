@@ -1,9 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-# -------------------------------------------------------------------------
+# Diffusion MRI Analysis Pipeline
+# Written by Payam S. Shabestari, Zurich, 01.2025
+# email: payam.sadeghishabestari@uzh.ch
+# This script is written mainly for Antinomics project. However It could be used for other purposes.
+
+
 # Paths – adjust as needed
-# -------------------------------------------------------------------------
 t1_dir="/home/ubuntu/volume/Antinomics/subjects_fsl_dir"
 fmri_dir="/home/ubuntu/volume/Antinomics/raws/fMRI"
 sessions=("s1" "s2")     # list all sessions here
@@ -13,9 +17,8 @@ t1_fast_dir="$t1_dir/02_fast"
 reg_dir="$t1_dir/03_reg"
 funcprep_dir="$t1_dir/04_funcprep"
 
-# -------------------------------------------------------------------------
+
 # Function to preprocess a single subject
-# -------------------------------------------------------------------------
 preprocess_subject() {
     local subject=$1
     echo "=== Preprocessing subject: $subject ==="
@@ -74,14 +77,17 @@ preprocess_subject() {
         fi
 
         # ------------------ 4b. Slice timing correction ------------------
+        echo "[5] Slice time correction with slicetimer"
         slicetimer -i "$outdir/${subject}_unwarped.nii.gz" \
                    -o "$outdir/${subject}_st"
 
         # ------------------ 4c. Motion correction ------------------
+        echo "[6] Motion correction with mcflirt"
         mcflirt -in "$outdir/${subject}_st" \
                 -out "$outdir/${subject}_mc" -plots -mats
 
         # ------------------ 4d. Intensity normalization ------------------
+        echo "[7] Intensity normalization"
         fslmaths "$outdir/${subject}_mc" -ing 1000 \
                  "$outdir/${subject}_norm"
     done

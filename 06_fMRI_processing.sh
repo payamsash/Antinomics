@@ -95,7 +95,7 @@ preprocess_subject() {
     echo "=== Finished preprocessing subject: $subject ==="
 }
 
-# Loop over subjects in 01_denoised folder
+# Loop over subjects
 for t1_file in "$t1_dir"/01_denoised/*_denoised.nii; do
     subject=$(basename "$t1_file" _denoised.nii)
     if [ "$subject" = "asjt" ]; then

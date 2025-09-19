@@ -8,8 +8,9 @@
 set -euo pipefail
 export FREESURFER_HOME=/usr/local/freesurfer/8.0.0
 export SUBJECTS_DIR=/home/ubuntu/volume/Antinomics/subjects_fs_dir
-export PATH=/home/ubuntu/data/src_codes/ants-2.5.4/bin:$PATH
+export PATH=/home/ubuntu/ants-2.6.2/ants-2.6.2/bin:$PATH
 export LUT_DIR=/usr/local/mrtrix3/share/mrtrix3/labelconvert
+export ANTSPATH=/home/ubuntu/ants-2.6.2/ants-2.6.2/bin
 
 processDTI () {
     local subject_id=$1
@@ -20,14 +21,14 @@ processDTI () {
     ## set paths
     ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
     mkdir "$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
-    subject_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
+    subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     subject_fs_dir="$SUBJECTS_DIR/$subject_id"
     raw_dwi="$ANTINOMICS_DIR/raws/dMRI/${subject_id}.rec"
     raw_anat="$ANTINOMICS_DIR/raws/sMRI_T1/${subject_id}.nii"
 
     ## Conversion
-    dcm2niix -f raw_dwi -o $subject_dir $raw_dwi
-    cd $subject_dir
+    dcm2niix -f raw_dwi -o $subject_dwi_dir $raw_dwi
+    cd $subject_dwi_dir
     mrconvert raw_dwi.nii raw_dwi.mif -fslgrad raw_dwi.bvec raw_dwi.bval
     echo -e "\e[32mConverted to nifti and mif formats successfuly!"
 
@@ -43,14 +44,14 @@ processDTI () {
     ## lets see how dwi2mask works, if bad: 1. I'll compute the mask from raw_anat then register it to the diffusion space
     ## lets see how dwi2mask works, if bad: 2. I'll provide the template image and corresponding mask from T2 data.
     dwi2mask dwi_preproc.mif mask.mif
-    dwi2response dhollander dwi_unbiased.mif wm_response.txt -voxels voxels.mif
+    dwi2response tournier dwi_unbiased.mif wm_response.txt -voxels voxels.mif
     dwi2fod csd dwi_unbiased.mif -mask mask.mif wm_response.txt wmfod.mif
     mtnormalise wmfod.mif wmfod_norm.mif -mask mask.mif
     echo -e "\e[32mCSD is done successfuly!"
 
     ### Registration to anatomical image
     mrconvert $raw_anat raw_anat.mif
-    5ttgen hsvs raw_anat.mif 5tt_nocoreg.mif
+    5ttgen hsvs $subject_fs_dir 5tt_nocoreg.mif
     dwiextract dwi_unbiased.mif mean_b0.mif -bzero
     mrconvert mean_b0.mif mean_b0.nii.gz
     mrconvert 5tt_nocoreg.mif 5tt_nocoreg.nii.gz
@@ -61,7 +62,6 @@ processDTI () {
             -interp nearestneighbour \
             -dof 6 \
             -omat diff2struct_fsl.mat
-    # fslview 5tt_vol0.nii.gz mean_b0.nii.gz -t 0.5
     
     ### Generate GM–WM interface for ACT 
     transformconvert diff2struct_fsl.mat mean_b0.nii.gz 5tt_nocoreg.nii.gz flirt_import diff2struct_mrtrix.txt
@@ -128,7 +128,10 @@ processDTI () {
             done
         fi
     done
-mrtrix_cleanup $subject_dir
+mrtrix_cleanup $subject_dwi_dir
 }
 
-
+for t1_file in /home/ubuntu/volume/Antinomics/raws/sMRI_T1/*.nii; do
+    subject_id=$(basename "$t1_file" .nii)
+    processDTI "$subject_id"
+done

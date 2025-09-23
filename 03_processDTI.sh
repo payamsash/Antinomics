@@ -135,3 +135,15 @@ for t1_file in /home/ubuntu/volume/Antinomics/raws/sMRI_T1/*.nii; do
     subject_id=$(basename "$t1_file" .nii)
     processDTI "$subject_id"
 done
+
+
+### AFD group comparison ###
+
+for_each * : ln -sr IN/dwi_unbiased.mif ../AFD/unbiased/IN.mif
+for_each * : ln -sr IN/mask.mif ../AFD/masks/IN.mif
+dwinormalise group ../AFD/unbiased/ ../AFD/masks/ ../AFD/dwi_output/ ../AFD/fa_template.mif ../AFD/fa_template_wm_mask.mif
+for_each ../AFD/dwi_output/* : ln -sr IN PRE/dwi_normalised.mif
+for_each * : dwi2response tournier IN/dwi_normalised.mif IN/response.txt
+responsemean */response.txt ../AFD/group_average_response.txt
+
+# https://mrtrix.readthedocs.io/en/latest/fixel_based_analysis/st_fibre_density_cross-section.html#introduction

@@ -12,7 +12,7 @@ export PATH=/home/ubuntu/ants-2.6.2/ants-2.6.2/bin:$PATH
 export LUT_DIR=/usr/local/mrtrix3/share/mrtrix3/labelconvert
 export ANTSPATH=/home/ubuntu/ants-2.6.2/ants-2.6.2/bin
 
-processDTI () {
+preprocessDTI () {
     local subject_id=$1
     echo "Processing subject: $subject_id"
     echo "dMRI processing started at $(date '+%Y-%m-%d %H:%M:%S')"
@@ -39,11 +39,147 @@ processDTI () {
     dwifslpreproc dwi_gibb.mif dwi_preproc.mif -pe_dir ap -rpe_none  # roger says its okay
     dwibiascorrect ants dwi_preproc.mif dwi_unbiased.mif -bias bias.mif 
     echo -e "\e[32mPreprocessing is done successfuly!"
+    dwi2mask dwi_preproc.mif mask.mif
+    mrtrix_cleanup $subject_dwi_dir
+}
+
+compute_fixel_fixel_connectome () {
+    ### set Paths
+    ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
+    AFD_DIR="/home/ubuntu/volume/Antinomics/AFD"
+    mkdir -p $AFD_DIR
+    mkdir -p "$AFD_DIR/unbiased"
+    cd "$ANTINOMICS_DIR/subjects_mrtrix_dir"
+    
+    ### compute average response
+    for_each * : ln -sr IN/dwi_unbiased.mif ../AFD/unbiased/IN.mif
+    for_each * : ln -sr IN/mask.mif ../AFD/masks/IN.mif
+    dwinormalise group ../AFD/unbiased/ ../AFD/masks/ ../AFD/normalized/ ../AFD/fa_template.mif ../AFD/fa_template_wm_mask.mif
+    for_each ../AFD/normalized/* : ln -sr IN PRE/dwi_normalised.mif
+    for_each * : dwi2response tournier IN/dwi_normalised.mif IN/response.txt
+    responsemean */response.txt ../AFD/group_average_response.txt
+    rm -r ../AFD/normalized
+    rm -r ../AFD/masks
+
+    ### upsample the dwi data
+    for_each * : mrgrid IN/dwi_normalised.mif regrid -vox 1.25 IN/dwi_upsampled.mif
+    for_each * : dwi2mask IN/dwi_upsampled.mif IN/mask_upsampled.mif
+
+    ### Fibre Orientation Distribution estimation
+    for_each * : dwiextract IN/dwi_upsampled.mif - \| dwi2fod msmt_csd - ../AFD/group_average_response.txt IN/wmfod.mif -mask IN/mask_upsampled.mif
+
+    ### Generate a study-specific unbiased FOD template
+    mkdir -p ../diffusion_template/fod_input
+    mkdir ../diffusion_template/mask_input
+    for_each * : ln -sr IN/wmfod.mif ../diffusion_template/fod_input/PRE.mif
+    for_each * : ln -sr IN/mask_upsampled.mif ../diffusion_template/mask_input/PRE.mif
+    population_template ../diffusion_template/fod_input -mask_dir ../diffusion_template/mask_input ../diffusion_template/wmfod_template.mif -voxel_size 1.25
+
+    ### Register all subject FOD images to the FOD template
+    for_each * : mrregister IN/wmfod.mif -mask1 IN/mask_upsampled.mif ../diffusion_template/wmfod_template.mif -nl_warp IN/subject2template_warp.mif IN/template2subject_warp.mif
+
+    ### Compute the template mask
+    for_each * : mrtransform IN/mask_upsampled.mif -warp IN/subject2template_warp.mif -interp nearest -datatype bit IN/mask_in_template_space.mif
+    mrmath */mask_in_template_space.mif min ../diffusion_template/template_mask.mif -datatype bit
+
+    ### Compute a white matter template analysis fixel mask
+    fod2fixel -mask ../diffusion_template/template_mask.mif -fmls_peak_value 0.10 ../diffusion_template/wmfod_template.mif ../diffusion_template/fixel_mask
+    for_each * : mrtransform IN/wmfod.mif -warp IN/subject2template_warp.mif -reorient_fod no IN/fod_in_template_space_NOT_REORIENTED.mif
+    for_each * : fod2fixel -mask ../diffusion_template/template_mask.mif IN/fod_in_template_space_NOT_REORIENTED.mif IN/fixel_in_template_space_NOT_REORIENTED -afd fd.mif
+    for_each * : fixelreorient IN/fixel_in_template_space_NOT_REORIENTED IN/subject2template_warp.mif IN/fixel_in_template_space
+    for_each * : rm -r IN/fixel_in_template_space_NOT_REORIENTED
+
+    ### Assign subject fixels to template fixels
+    for_each * : fixelcorrespondence IN/fixel_in_template_space/fd.mif ../diffusion_template/fixel_mask ../diffusion_template/fd PRE.mif
+
+    ### Compute the fibre cross-section (FC) metric
+    for_each * : warp2metric IN/subject2template_warp.mif -fc ../diffusion_template/fixel_mask ../diffusion_template/fc IN.mif
+    mkdir ../diffusion_template/log_fc
+    cp ../diffusion_template/fc/index.mif ../diffusion_template/fc/directions.mif ../diffusion_template/log_fc
+    for_each * : mrcalc ../diffusion_template/fc/IN.mif -log ../diffusion_template/log_fc/IN.mif
+
+    ### Compute a combined measure of fibre density and cross-section (FDC)
+    mkdir ../diffusion_template/fdc
+    cp ../diffusion_template/fc/index.mif ../diffusion_template/fdc
+    cp ../diffusion_template/fc/directions.mif ../diffusion_template/fdc
+    for_each * : mrcalc ../diffusion_template/fd/IN.mif ../diffusion_template/fc/IN.mif -mult ../diffusion_template/fdc/IN.mif
+
+    ### Perform whole-brain fibre tractography on the FOD template
+    cd ../diffusion_template
+    tckgen -angle 22.5 -maxlen 250 -minlen 10 -power 1.0 wmfod_template.mif -seed_image template_mask.mif -mask template_mask.mif -select 10000000 -cutoff 0.10 tracks_10_million.tck
+    tcksift tracks_10_million.tck wmfod_template.mif tracks_1_million_sift.tck -term_number 1000000
+
+    ### Generate fixel-fixel connectivity matrix
+    fixelconnectivity fixel_mask/ tracks_1_million_sift.tck matrix/
+    fixelfilter fd smooth fd_smooth -matrix matrix/
+    fixelfilter log_fc smooth log_fc_smooth -matrix matrix/
+    fixelfilter fdc smooth fdc_smooth -matrix matrix/
+}
+
+create_tractography () {
 
     ### Constrained Spherical Deconvolution
-    ## lets see how dwi2mask works, if bad: 1. I'll compute the mask from raw_anat then register it to the diffusion space
-    ## lets see how dwi2mask works, if bad: 2. I'll provide the template image and corresponding mask from T2 data.
-    dwi2mask dwi_preproc.mif mask.mif
+    dwi2response tournier dwi_unbiased.mif wm_response.txt -voxels voxels.mif
+    dwi2fod csd dwi_unbiased.mif -mask mask.mif wm_response.txt wmfod.mif
+    mtnormalise wmfod.mif wmfod_norm.mif -mask mask.mif
+    echo -e "\e[32mCSD is done successfuly!"
+
+    ### Registration to anatomical image
+    mrconvert $raw_anat raw_anat.mif
+    5ttgen hsvs $subject_fs_dir 5tt_nocoreg.mif
+    dwiextract dwi_unbiased.mif mean_b0.mif -bzero
+    mrconvert mean_b0.mif mean_b0.nii.gz
+    mrconvert 5tt_nocoreg.mif 5tt_nocoreg.nii.gz
+    
+    fslroi 5tt_nocoreg.nii.gz 5tt_vol0.nii.gz 0 1
+    flirt -in mean_b0.nii.gz \
+            -ref 5tt_vol0.nii.gz \
+            -interp nearestneighbour \
+            -dof 6 \
+            -omat diff2struct_fsl.mat
+    
+    ### Generate GM–WM interface for ACT 
+    transformconvert diff2struct_fsl.mat mean_b0.nii.gz 5tt_nocoreg.nii.gz flirt_import diff2struct_mrtrix.txt
+    mrtransform 5tt_nocoreg.mif -linear diff2struct_mrtrix.txt -inverse 5tt_coreg.mif
+    5tt2gmwmi 5tt_coreg.mif gmwmSeed_coreg.mif
+
+    ### Tractography
+    tckgen -act 5tt_coreg.mif \
+                -backtrack \
+                -seed_gmwmi gmwmSeed_coreg.mif \
+                -select 10000000 \
+                wmfod_norm.mif \
+                tracks_10M.tck
+    tckedit tracks_10M.tck -number 200k smallerTracks_200k.tck
+    tcksift2 -act 5tt_coreg.mif \
+                -out_mu sift_mu.txt \
+                -out_coeffs sift_coeffs.txt \
+                tracks_10M.tck \
+                wmfod_norm.mif \
+                sift_1M.txt
+}
+
+
+
+
+
+
+
+
+processDTI_4 () {
+    cd ../diffusion_template 
+    ### Perform statistical analysis of FD, FC, and FDC
+    fixelcfestats fd_smooth/ files.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fd/
+    fixelcfestats log_fc_smooth/ files.txt design_matrix.txt contrast_matrix.txt matrix/ stats_log_fc/
+    fixelcfestats fdc_smooth/ files.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fdc/
+}
+
+
+
+
+
+
+    ### Constrained Spherical Deconvolution
     dwi2response tournier dwi_unbiased.mif wm_response.txt -voxels voxels.mif
     dwi2fod csd dwi_unbiased.mif -mask mask.mif wm_response.txt wmfod.mif
     mtnormalise wmfod.mif wmfod_norm.mif -mask mask.mif
@@ -137,13 +273,5 @@ for t1_file in /home/ubuntu/volume/Antinomics/raws/sMRI_T1/*.nii; do
 done
 
 
-### AFD group comparison ###
-
-for_each * : ln -sr IN/dwi_unbiased.mif ../AFD/unbiased/IN.mif
-for_each * : ln -sr IN/mask.mif ../AFD/masks/IN.mif
-dwinormalise group ../AFD/unbiased/ ../AFD/masks/ ../AFD/dwi_output/ ../AFD/fa_template.mif ../AFD/fa_template_wm_mask.mif
-for_each ../AFD/dwi_output/* : ln -sr IN PRE/dwi_normalised.mif
-for_each * : dwi2response tournier IN/dwi_normalised.mif IN/response.txt
-responsemean */response.txt ../AFD/group_average_response.txt
-
 # https://mrtrix.readthedocs.io/en/latest/fixel_based_analysis/st_fibre_density_cross-section.html#introduction
+# FBA pinpoints where microstructure changes are happening; connectome analysis shows whether those local changes propagate into altered network connectivity.

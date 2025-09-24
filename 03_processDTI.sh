@@ -59,8 +59,6 @@ compute_fixel_fixel_connectome () {
     for_each ../AFD/normalized/* : ln -sr IN PRE/dwi_normalised.mif
     for_each * : dwi2response tournier IN/dwi_normalised.mif IN/response.txt
     responsemean */response.txt ../AFD/group_average_response.txt
-    rm -r ../AFD/normalized
-    rm -r ../AFD/masks
 
     ### upsample the dwi data
     for_each * : mrgrid IN/dwi_normalised.mif regrid -vox 1.25 IN/dwi_upsampled.mif
@@ -276,3 +274,5 @@ done
 
 # https://mrtrix.readthedocs.io/en/latest/fixel_based_analysis/st_fibre_density_cross-section.html#introduction
 # FBA pinpoints where microstructure changes are happening; connectome analysis shows whether those local changes propagate into altered network connectivity.
+
+# Perfect — that plan is sensible and common: (A) run group-level, template-space whole-brain analyses (FBA / template tractography → group stats), (B) focus those same template-space analyses on the subcortex, then (C) go back to native-space subject-specific ACT tractography to compute subject SC and FC inside the subcortex for subject-level structure⇄function analyses and prediction.

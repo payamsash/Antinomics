@@ -44,20 +44,37 @@ preprocess_subject() {
 
     # ------------------ 3. Registration T1 -> mean functional ------------------
     echo "[3] FLIRT 6 dof"
-    flirt -in "$t1_file" -ref "$mean_func_brain" -dof 6 \
-          -omat "$reg_dir/${subject}_6dof.mat"
+    flirt -in "$t1_brain" -ref "$mean_func_brain" -dof 6 \
+      -omat "$reg_dir/${subject}_6dof.mat"
 
-    echo "[3] FLIRT 12 dof"
-    flirt -in "$t1_file" -ref "$mean_func_brain" -dof 12 \
-          -omat "$reg_dir/${subject}_12dof.mat"
+    ## flirt -in t1_brain.nii.gz -ref mean_func_brain.nii.gz -dof 6 -omat t1_to_func_6dof.mat
+    ## flirt -in t1_brain.nii.gz -ref mean_func_brain.nii.gz -dof 12 -init t1_to_func_6dof.mat -omat t1_to_func_12dof.mat
+    # fnirt --in="asjt_denoised_reoriented.nii.gz" \
+    #   --aff="t1_to_func_12dof.mat" \
+    #   --ref="mean_func_brain.nii.gz" \
+    #   --iout="t1_in_func_fnirt.nii.gz" \
+    #   --cout="func_warpcoef.nii.gz"
 
-    echo "[3] FNIRT nonlinear warp"
-    fnirt --in="$t1_file" \
-          --aff="$reg_dir/${subject}_12dof.mat" \
-          --ref="$mean_func_brain" \
-          --iout="$reg_dir/${subject}_fnirt.nii.gz" \
-          --cout="$reg_dir/${subject}_warpcoef.nii.gz"
+    ## fsleyes mean_func_brain.nii.gz ${reg_dir}/${subject}_t1_in_func_fnirt.nii.gz &
+    ## fsleyes wm_in_func.nii.gz gm_in_func.nii.gz csf_in_func.nii.gz t1_in_func_fnirt.nii.gz &
+    applywarp --in="pve_0.nii.gz" \
+            --ref="mean_func_brain.nii.gz" \
+            --warp="func_warpcoef.nii.gz" \
+            --out="csf_in_func.nii.gz" \
+            --interp=trilinear
 
+    applywarp --in="pve_1.nii.gz" \
+            --ref="mean_func_brain.nii.gz" \
+            --warp="func_warpcoef.nii.gz" \
+            --out="gm_in_func.nii.gz" \
+            --interp=trilinear
+    
+    applywarp --in="pve_2.nii.gz" \
+            --ref="mean_func_brain.nii.gz" \
+            --warp="func_warpcoef.nii.gz" \
+            --out="wm_in_func.nii.gz" \
+            --interp=trilinear
+    
     # ------------------ 4. Loop over sessions ------------------
     for session in "${sessions[@]}"; do
         echo "[4] Processing session: $session"
@@ -65,38 +82,21 @@ preprocess_subject() {
         outdir="$funcprep_dir/${session}_${subject}"
         mkdir -p "$outdir"
 
-        # ------------------ 4a. Skip applytopup if acqparams.txt is missing ------------------
-        if [[ -f "$funcprep_dir/acqparams.txt" && -f "$funcprep_dir/topup_results_field.nii.gz" ]]; then
-            echo "[4a] BOLD unwarping with applytopup"
-            applytopup --imain="$bold" \
-                       --datain="$funcprep_dir/acqparams.txt" \
-                       --inindex=1 \
-                       --topup="$funcprep_dir/topup_results" \
-                       --out="$outdir/${subject}_unwarped" \
-                       --method=jac
-        else
-            echo "[4a] Skipping applytopup, copying original BOLD"
-            cp "$bold" "$outdir/${subject}_unwarped.nii.gz"
-        fi
-
         # ------------------ 4b. Slice timing correction ------------------
         echo "[5] Slice time correction with slicetimer"
-        slicetimer -i "$outdir/${subject}_unwarped.nii.gz" \
-                   -o "$outdir/${subject}_st"
+        slicetimer -i "asjt_s1_reoriented.nii.gz" -o "asjt_st"
 
         # ------------------ 4c. Motion correction ------------------
         echo "[6] Motion correction with mcflirt"
-        mcflirt -in "$outdir/${subject}_st" \
-                -out "$outdir/${subject}_mc" -plots -mats
+        mcflirt -in "asjt_st" -out "asjt_mc" -plots
 
         # ------------------ 4d. Intensity normalization ------------------
         echo "[7] Intensity normalization"
-        fslmaths "$outdir/${subject}_mc" -ing 1000 \
-                 "$outdir/${subject}_norm"
+        fslmaths "asjt_mc" -ing 1000 "asjt_norm"
     done
-
     echo "=== Finished preprocessing subject: $subject ==="
 }
+
 
 # Loop over subjects
 for t1_file in "$t1_dir"/01_denoised/*_denoised.nii; do

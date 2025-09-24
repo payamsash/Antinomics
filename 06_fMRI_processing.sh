@@ -23,6 +23,9 @@ preprocess_subject() {
     local subject=$1
     echo "=== Preprocessing subject: $subject ==="
 
+    # ------------------ 0. Reorient to MNI ------------------
+    fslreorient2std asjt_denoised.nii reoriented_asjt_denoised.nii.gz # fix here
+
     # ------------------ 1. FAST segmentation ------------------
     t1_file="$t1_dir/01_denoised/${subject}_denoised.nii"
     echo "[1] FAST segmentation"

@@ -49,6 +49,7 @@ compute_fixel_fixel_connectome () {
     AFD_DIR="/home/ubuntu/volume/Antinomics/AFD"
     mkdir -p $AFD_DIR
     mkdir -p "$AFD_DIR/unbiased"
+    mkdir -p "$AFD_DIR/masks"
     cd "$ANTINOMICS_DIR/subjects_mrtrix_dir"
     
     ### compute average response

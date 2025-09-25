@@ -9,7 +9,7 @@ set -e
 denoised_dir="/home/ubuntu/volume/Antinomics/raws/t1_denoised"
 fmri_dir="/home/ubuntu/volume/Antinomics/raws/fMRI"
 subjects_fsl_dir="/home/ubuntu/volume/Antinomics/subjects_fsl_dir"
-sessions=("s1" "s2")    
+sessions=("s1" "s2")
 
 preprocess_subject() {
     local subject=$1
@@ -33,14 +33,14 @@ preprocess_subject() {
     echo "[4] Brain extraction of functional"
     bet "meanfunc" "meanfunc_brain" -F -m
 
-    echo "[4] Registration T1 -> mean functional linear 6 and 12 dof"
+    echo "[5] Registration T1 -> mean functional linear 6 and 12 dof"
     flirt -in "t1_brain" -ref "meanfunc_brain" -dof 6 -omat "t1_to_func_6dof.mat"
     flirt -in "t1_brain" -ref "meanfunc_brain" -dof 12 -init "t1_to_func_6dof.mat" -omat "t1_to_func_12dof.mat"
     
-    echo "[5] Registration T1 -> mean functional nonlinear"
+    echo "[6] Registration T1 -> mean functional nonlinear"
     fnirt --in="t1_brain" --aff="t1_to_func_12dof.mat" --ref="meanfunc_brain" --iout="t1_in_func_fnirt" --cout="func_warpcoef"
 
-    echo "[6] Unwarping masks"
+    echo "[7] Unwarping masks"
     applywarp --in="t1_pve_0" \
             --ref="meanfunc_brain" \
             --warp="func_warpcoef" \
@@ -59,24 +59,23 @@ preprocess_subject() {
             --out="wm_in_func" \
             --interp=trilinear
     
-    echo "[7] Slice time correction with slicetimer"
-    slicetimer -i "t2_s1_reoriented" -o "t2_s1_st"
-    slicetimer -i "t2_s2_reoriented" -o "t2_s2_st"
+    echo "[8] Slice time correction with slicetimer"
+    slicetimer -i "t2_s1_reoriented" -o "t2_s1_st" --odd -r 2.5
+    slicetimer -i "t2_s2_reoriented" -o "t2_s2_st" --odd -r 2.5
 
-    echo "[8] Motion correction with mcflirt"
+    echo "[9] Motion correction with mcflirt"
     mcflirt -in "t2_s1_st" -out "t2_s1_mc" -plots
     mcflirt -in "t2_s2_st" -out "t2_s2_mc" -plots
 
-    echo "[9] Intensity normalization"
+    echo "[10] Intensity normalization"
     fslmaths "t2_s1_mc" -ing 1000 "t2_s1_norm"
     fslmaths "t2_s2_mc" -ing 1000 "t2_s2_norm"
 
-    echo "[10] Cleaning directory"
+    echo "[11] Cleaning directory"
     rm t2_s1_st.nii.gz t2_s2_st.nii.gz t2_s1_mc.nii.gz t2_s2_mc.nii.gz
     echo "=== Finished preprocessing subject: $subject ==="
 
 }
-
 
 # Loop over subjects
 for t1_file in "$denoised_dir"/*_denoised.nii; do

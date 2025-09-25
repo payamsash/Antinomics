@@ -1,32 +1,31 @@
 #!/bin/bash
-set -euo pipefail
+set -e
 
 # fMRI Analysis Pipeline
 # Written by Payam S. Shabestari, Zurich, 01.2025
 # email: payam.sadeghishabestari@uzh.ch
 # This script is written mainly for Antinomics project. However It could be used for other purposes.
 
-
-# Paths – adjust as needed
-denoised_dir="/home/ubuntu/volume/Antinomics/subjects_fsl_dir/denoised"
+denoised_dir="/home/ubuntu/volume/Antinomics/raws/t1_denoised"
 fmri_dir="/home/ubuntu/volume/Antinomics/raws/fMRI"
-sessions=("s1" "s2")     # list all sessions here
+subjects_fsl_dir="/home/ubuntu/volume/Antinomics/subjects_fsl_dir"
+sessions=("s1" "s2")    
 
-
-# Function to preprocess a single subject
 preprocess_subject() {
     local subject=$1
-    cd $fmri_dir/$subject
+    mkdir -p "$subjects_fsl_dir/$subject"
+    cd "$subjects_fsl_dir/$subject"
+
     echo "[0] Reorient to MNI"
     fslreorient2std "$denoised_dir/${subject}_denoised.nii" "t1_reoriented"
-    fslreorient2std "fmri_dir/${subject}_s1.nii" "t2_s1_reoriented" # fix this one
-    fslreorient2std "${subject}_s2.nii" "t2_s2_reoriented"
+    fslreorient2std "$fmri_dir/s1/${subject}.nii" "t2_s1_reoriented"
+    fslreorient2std "$fmri_dir/s2/${subject}.nii" "t2_s2_reoriented"
 
-    echo "[1] FAST segmentation"
-    fast -B -o . "t1_reoriented"
+    echo "[1] Brain extraction of T1"
+    bet t1_reoriented t1_brain
 
-    echo "[2] Brain extraction of T1"
-    bet t1_reoriented "t1_brain"
+    echo "[2] FAST segmentation"
+    fast -B -o t1 t1_brain
 
     echo "[3] Creating mean functional for registration"
     fslmaths "t2_s1_reoriented" -Tmean "meanfunc"
@@ -42,19 +41,19 @@ preprocess_subject() {
     fnirt --in="t1_brain" --aff="t1_to_func_12dof.mat" --ref="meanfunc_brain" --iout="t1_in_func_fnirt" --cout="func_warpcoef"
 
     echo "[6] Unwarping masks"
-    applywarp --in="pve_0" \
+    applywarp --in="t1_pve_0" \
             --ref="meanfunc_brain" \
             --warp="func_warpcoef" \
             --out="csf_in_func" \
             --interp=trilinear
 
-    applywarp --in="pve_1" \
+    applywarp --in="t1_pve_1" \
             --ref="meanfunc_brain" \
             --warp="func_warpcoef" \
             --out="gm_in_func" \
             --interp=trilinear
     
-    applywarp --in="pve_2" \
+    applywarp --in="t1_pve_2" \
             --ref="meanfunc_brain" \
             --warp="func_warpcoef" \
             --out="wm_in_func" \
@@ -72,18 +71,21 @@ preprocess_subject() {
     fslmaths "t2_s1_mc" -ing 1000 "t2_s1_norm"
     fslmaths "t2_s2_mc" -ing 1000 "t2_s2_norm"
 
+    echo "[10] Cleaning directory"
+    rm t2_s1_st.nii.gz t2_s2_st.nii.gz t2_s1_mc.nii.gz t2_s2_mc.nii.gz
     echo "=== Finished preprocessing subject: $subject ==="
+
 }
 
 
 # Loop over subjects
-for t1_file in "$denoised_dir/*_denoised.nii"; do
+for t1_file in "$denoised_dir"/*_denoised.nii; do
     subject=$(basename "$t1_file" _denoised.nii)
-    if [ "$subject" = "asjt" ]; then
+    if [ "$subject" != "asjt" ]; then
         preprocess_subject "$subject"
     fi
 done
 
 ## for visual check
-## fsleyes mean_func_brain.nii.gz ${reg_dir}/${subject}_t1_in_func_fnirt.nii.gz &
-## fsleyes wm_in_func.nii.gz gm_in_func.nii.gz csf_in_func.nii.gz t1_in_func_fnirt.nii.gz &
+## fsleyes meanfunc_brain t1_in_func_fnirt.nii.gz &
+## fsleyes wm_in_func gm_in_func csf_in_func t2_s1_norm &

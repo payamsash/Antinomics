@@ -22,7 +22,7 @@ preprocess_subject() {
     fslreorient2std "$fmri_dir/s2/${subject}.nii" "t2_s2_reoriented"
 
     echo "[1] Brain extraction of T1"
-    bet t1_reoriented t1_brain
+    bet t1_reoriented t1_brain -m
 
     echo "[2] FAST segmentation"
     fast -B -o t1 t1_brain
@@ -58,6 +58,12 @@ preprocess_subject() {
             --warp="func_warpcoef" \
             --out="wm_in_func" \
             --interp=trilinear
+
+    applywarp --in="t1_brain_mask" \
+                --ref="meanfunc_brain" \
+                --warp="func_warpcoef" \
+                --out="brain_mask_in_func" \
+                --interp=nn
     
     echo "[8] Slice time correction with slicetimer"
     slicetimer -i "t2_s1_reoriented" -o "t2_s1_st" --odd -r 2.5

@@ -115,6 +115,15 @@ compute_fixel_fixel_connectome () {
     fixelfilter fdc smooth fdc_smooth -matrix matrix/
 }
 
+## stats
+nohup bash -c '
+  fixelcfestats fd_smooth/     subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fd/     &&
+  fixelcfestats log_fc_smooth/ subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_log_fc/ &&
+  fixelcfestats fdc_smooth/    subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fdc/
+' > fixelcfestats_all.out 2>&1 &
+
+
+
 create_tractography () {
 
     ### Constrained Spherical Deconvolution
@@ -276,3 +285,8 @@ done
 # FBA pinpoints where microstructure changes are happening; connectome analysis shows whether those local changes propagate into altered network connectivity.
 
 # Perfect — that plan is sensible and common: (A) run group-level, template-space whole-brain analyses (FBA / template tractography → group stats), (B) focus those same template-space analyses on the subcortex, then (C) go back to native-space subject-specific ACT tractography to compute subject SC and FC inside the subcortex for subject-level structure⇄function analyses and prediction.
+
+
+## some viz
+mrview wmfod_template.mif -odf.load_sh wmfod_template.mif
+mrview wmfod_template.mif -fixel.load fd_smooth/asjt.mif

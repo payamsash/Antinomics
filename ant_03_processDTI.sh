@@ -115,15 +115,15 @@ compute_fixel_fixel_connectome () {
     fixelfilter fdc smooth fdc_smooth -matrix matrix/
 }
 
-## stats
-nohup bash -c '
-  fixelcfestats fd_smooth/     subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fd/     &&
-  fixelcfestats log_fc_smooth/ subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_log_fc/ &&
-  fixelcfestats fdc_smooth/    subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fdc/
-' > fixelcfestats_all.out 2>&1 &
+run_stats_on_fixels () {
+    ## stats
+    fixelcfestats fd_smooth/     subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fd/     
+    fixelcfestats log_fc_smooth/ subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_log_fc/ 
+    fixelcfestats fdc_smooth/    subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fdc/
+}
 
 
-
+## subject level
 create_tractography () {
 
     ### Constrained Spherical Deconvolution

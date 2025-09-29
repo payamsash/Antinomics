@@ -117,28 +117,33 @@ compute_fixel_fixel_connectome () {
 
 run_stats_on_fixels () {
     ## stats
-    fixelcfestats fd_smooth/     subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fd/     
-    fixelcfestats log_fc_smooth/ subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_log_fc/ 
-    fixelcfestats fdc_smooth/    subjects.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fdc/
+    nohup bash -c 'fixelcfestats fd_smooth/ subjects.txt design_matrix.txt contrast_CT.txt matrix/ stats_fd_CT/ && \
+    fixelcfestats log_fc_smooth/ subjects.txt design_matrix.txt contrast_CT.txt matrix/ stats_log_fc_CT/ && \
+    fixelcfestats fdc_smooth/ subjects.txt design_matrix.txt contrast_CT.txt matrix/ stats_fdc_CT/ && \
+    fixelcfestats fd_smooth/ subjects.txt design_matrix.txt contrast_TC.txt matrix/ stats_fd_TC/ && \
+    fixelcfestats log_fc_smooth/ subjects.txt design_matrix.txt contrast_TC.txt matrix/ stats_log_fc_TC/ && \
+    fixelcfestats fdc_smooth/ subjects.txt design_matrix.txt contrast_TC.txt matrix/ stats_fdc_TC/' \
+    > fixelcfestats_all.out 2>&1 &
 }
 
 
 ## subject level
 create_tractography () {
+    local subject_id=$1
+    echo "Processing subject: $subject_id"
 
-    ### Constrained Spherical Deconvolution
-    dwi2response tournier dwi_unbiased.mif wm_response.txt -voxels voxels.mif
-    dwi2fod csd dwi_unbiased.mif -mask mask.mif wm_response.txt wmfod.mif
-    mtnormalise wmfod.mif wmfod_norm.mif -mask mask.mif
-    echo -e "\e[32mCSD is done successfuly!"
-
+    ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
+    subject_fs_dir="$SUBJECTS_DIR/$subject_id"
+    subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
+    raw_anat="$ANTINOMICS_DIR/raws/sMRI_T1/${subject_id}.nii"
+    cd $subject_dwi_dir
+    
     ### Registration to anatomical image
     mrconvert $raw_anat raw_anat.mif
     5ttgen hsvs $subject_fs_dir 5tt_nocoreg.mif
     dwiextract dwi_unbiased.mif mean_b0.mif -bzero
     mrconvert mean_b0.mif mean_b0.nii.gz
     mrconvert 5tt_nocoreg.mif 5tt_nocoreg.nii.gz
-    
     fslroi 5tt_nocoreg.nii.gz 5tt_vol0.nii.gz 0 1
     flirt -in mean_b0.nii.gz \
             -ref 5tt_vol0.nii.gz \
@@ -151,75 +156,14 @@ create_tractography () {
     mrtransform 5tt_nocoreg.mif -linear diff2struct_mrtrix.txt -inverse 5tt_coreg.mif
     5tt2gmwmi 5tt_coreg.mif gmwmSeed_coreg.mif
 
-    ### Tractography
+    ### global Tractography
     tckgen -act 5tt_coreg.mif \
                 -backtrack \
                 -seed_gmwmi gmwmSeed_coreg.mif \
                 -select 10000000 \
                 wmfod_norm.mif \
                 tracks_10M.tck
-    tckedit tracks_10M.tck -number 200k smallerTracks_200k.tck
-    tcksift2 -act 5tt_coreg.mif \
-                -out_mu sift_mu.txt \
-                -out_coeffs sift_coeffs.txt \
-                tracks_10M.tck \
-                wmfod_norm.mif \
-                sift_1M.txt
-}
 
-
-
-
-
-
-
-
-processDTI_4 () {
-    cd ../diffusion_template 
-    ### Perform statistical analysis of FD, FC, and FDC
-    fixelcfestats fd_smooth/ files.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fd/
-    fixelcfestats log_fc_smooth/ files.txt design_matrix.txt contrast_matrix.txt matrix/ stats_log_fc/
-    fixelcfestats fdc_smooth/ files.txt design_matrix.txt contrast_matrix.txt matrix/ stats_fdc/
-}
-
-
-
-
-
-
-    ### Constrained Spherical Deconvolution
-    dwi2response tournier dwi_unbiased.mif wm_response.txt -voxels voxels.mif
-    dwi2fod csd dwi_unbiased.mif -mask mask.mif wm_response.txt wmfod.mif
-    mtnormalise wmfod.mif wmfod_norm.mif -mask mask.mif
-    echo -e "\e[32mCSD is done successfuly!"
-
-    ### Registration to anatomical image
-    mrconvert $raw_anat raw_anat.mif
-    5ttgen hsvs $subject_fs_dir 5tt_nocoreg.mif
-    dwiextract dwi_unbiased.mif mean_b0.mif -bzero
-    mrconvert mean_b0.mif mean_b0.nii.gz
-    mrconvert 5tt_nocoreg.mif 5tt_nocoreg.nii.gz
-    
-    fslroi 5tt_nocoreg.nii.gz 5tt_vol0.nii.gz 0 1
-    flirt -in mean_b0.nii.gz \
-            -ref 5tt_vol0.nii.gz \
-            -interp nearestneighbour \
-            -dof 6 \
-            -omat diff2struct_fsl.mat
-    
-    ### Generate GM–WM interface for ACT 
-    transformconvert diff2struct_fsl.mat mean_b0.nii.gz 5tt_nocoreg.nii.gz flirt_import diff2struct_mrtrix.txt
-    mrtransform 5tt_nocoreg.mif -linear diff2struct_mrtrix.txt -inverse 5tt_coreg.mif
-    5tt2gmwmi 5tt_coreg.mif gmwmSeed_coreg.mif
-
-    ### Tractography
-    tckgen -act 5tt_coreg.mif \
-                -backtrack \
-                -seed_gmwmi gmwmSeed_coreg.mif \
-                -select 10000000 \
-                wmfod_norm.mif \
-                tracks_10M.tck
-    tckedit tracks_10M.tck -number 200k smallerTracks_200k.tck
     tcksift2 -act 5tt_coreg.mif \
                 -out_mu sift_mu.txt \
                 -out_coeffs sift_coeffs.txt \
@@ -227,66 +171,65 @@ processDTI_4 () {
                 wmfod_norm.mif \
                 sift_1M.txt
 
-    ## Create a Connectome for Atlases (pending from here)
-    labelconvert $subject_fs_dir/mri/aparc+aseg.mgz \
-                    $FREESURFER_HOME/FreeSurferColorLUT.txt \
-                    $LUT_DIR/fs_default.txt \
-                    aparc_parcels.mif
-    labelconvert $subject_fs_dir/mri/aparc.a2009s+aseg.mgz \
-                    $FREESURFER_HOME/FreeSurferColorLUT.txt \
-                    $LUT_DIR/fs_a2009s.txt \
-                    aparc2009s_parcels.mif
+    ## extract some metrics
+    fod2fixel wmfod.mif fixel_dir/ -afd fd.mif -mask mask.mif
+    tcksample -stat_tck mean -weight sift_coeffs.txt tracks_20M.tck fd.mif mean_fd_weighted.txt
+}
 
-    parcels=("aparc" "aparc.a2009s" "schaefer")
-    for parc in "${parcels[@]}"; do
-        if [[ $parc == "aparc" || $parc == "aparc.a2009s"]]; then
-            labelconvert $subject_fs_dir/mri/${parc}+aseg.mgz \
-                    $FREESURFER_HOME/FreeSurferColorLUT.txt \
-                    $LUT_DIR/fs_default.txt \
-                    ${parc}_parcels.mif
+# processDTI_4 () {
+
+#     ## Create a Connectome for Atlases (pending from here)
+#     labelconvert $subject_fs_dir/mri/aparc+aseg.mgz \
+#                     $FREESURFER_HOME/FreeSurferColorLUT.txt \
+#                     $LUT_DIR/fs_default.txt \
+#                     aparc_parcels.mif
+#     labelconvert $subject_fs_dir/mri/aparc.a2009s+aseg.mgz \
+#                     $FREESURFER_HOME/FreeSurferColorLUT.txt \
+#                     $LUT_DIR/fs_a2009s.txt \
+#                     aparc2009s_parcels.mif
+
+#     parcels=("aparc" "aparc.a2009s" "schaefer")
+#     for parc in "${parcels[@]}"; do
+#         if [[ $parc == "aparc" || $parc == "aparc.a2009s"]]; then
+#             labelconvert $subject_fs_dir/mri/${parc}+aseg.mgz \
+#                     $FREESURFER_HOME/FreeSurferColorLUT.txt \
+#                     $LUT_DIR/fs_default.txt \
+#                     ${parc}_parcels.mif
             
-            tck2connectome -symmetric -zero_diagonal -scale_invnodevol -tck_weights_in \
-                        sift_1M.txt tracks_10M.tck ${parc}_parcels.mif ${parc}_parcels_connectome.csv \
-                        -out_assignment ${parc}_parcels_assignments.txt
-            label2mesh ${parc}_parcels.mif ${parc}_parcels_mesh.obj
-            meshfilter ${parc}_parcels_mesh.obj smooth ${parc}_parcels_mesh_smoothed.obj
-            connectome2tck tracks_10M.tck ${parc}_parcels_assignments.txt ${parc}_parcels_edge_exemplar.tck \
-                            -files single -exemplars ${parc}_parcels.mif
-        fi
+#             tck2connectome -symmetric -zero_diagonal -scale_invnodevol -tck_weights_in \
+#                         sift_1M.txt tracks_10M.tck ${parc}_parcels.mif ${parc}_parcels_connectome.csv \
+#                         -out_assignment ${parc}_parcels_assignments.txt
+#             label2mesh ${parc}_parcels.mif ${parc}_parcels_mesh.obj
+#             meshfilter ${parc}_parcels_mesh.obj smooth ${parc}_parcels_mesh_smoothed.obj
+#             connectome2tck tracks_10M.tck ${parc}_parcels_assignments.txt ${parc}_parcels_edge_exemplar.tck \
+#                             -files single -exemplars ${parc}_parcels.mif
+#         fi
 
-        if [[ $parc == "schaefer" ]]; then
-            for n in 400 800 1000; do
+#         if [[ $parc == "schaefer" ]]; then
+#             for n in 400 800 1000; do
                 
-                    mrconvert $subject_fs_dir/schaefer/${n}Parcels_7Networks.mgz sch_${n}Parcels_7Networks.mif
+#                     mrconvert $subject_fs_dir/schaefer/${n}Parcels_7Networks.mgz sch_${n}Parcels_7Networks.mif
 
-                    tck2connectome -symmetric -zero_diagonal -scale_invnodevol -tck_weights_in \
-                                        sift_1M.txt tracks_10M.tck sch_${n}Parcels_7Networks.mif \
-                                        sch_${n}Parcels_7Networks_connectome.csv \
-                                        -out_assignment sch_${n}Parcels_7Networks_assignments.txt
-                    label2mesh sch_${n}Parcels_7Networks.mif sch_${n}Parcels_7Networks_mesh.obj
-                    meshfilter sch_${n}Parcels_7Networks_mesh.obj smooth sch_${n}Parcels_7Networks_mesh_smoothed.obj
-                    connectome2tck tracks_10M.tck sch_${n}Parcels_7Networks_assignments.txt \
-                                    sch_${n}Parcels_7Networks_edge_exemplar.tck -files single \
-                                    -exemplars sch_${n}Parcels_7Networks.mif
-                done
-            done
-        fi
-    done
-mrtrix_cleanup $subject_dwi_dir
-}
+#                     tck2connectome -symmetric -zero_diagonal -scale_invnodevol -tck_weights_in \
+#                                         sift_1M.txt tracks_10M.tck sch_${n}Parcels_7Networks.mif \
+#                                         sch_${n}Parcels_7Networks_connectome.csv \
+#                                         -out_assignment sch_${n}Parcels_7Networks_assignments.txt
+#                     label2mesh sch_${n}Parcels_7Networks.mif sch_${n}Parcels_7Networks_mesh.obj
+#                     meshfilter sch_${n}Parcels_7Networks_mesh.obj smooth sch_${n}Parcels_7Networks_mesh_smoothed.obj
+#                     connectome2tck tracks_10M.tck sch_${n}Parcels_7Networks_assignments.txt \
+#                                     sch_${n}Parcels_7Networks_edge_exemplar.tck -files single \
+#                                     -exemplars sch_${n}Parcels_7Networks.mif
+#                 done
+#             done
+#         fi
+#     done
+# mrtrix_cleanup $subject_dwi_dir
+# }
 
 for t1_file in /home/ubuntu/volume/Antinomics/raws/sMRI_T1/*.nii; do
     subject_id=$(basename "$t1_file" .nii)
-    processDTI "$subject_id"
+    if [ "$subject_id" = "asjt" ]; then
+        create_tractography "$subject_id"   
+    fi
 done
 
-
-# https://mrtrix.readthedocs.io/en/latest/fixel_based_analysis/st_fibre_density_cross-section.html#introduction
-# FBA pinpoints where microstructure changes are happening; connectome analysis shows whether those local changes propagate into altered network connectivity.
-
-# Perfect — that plan is sensible and common: (A) run group-level, template-space whole-brain analyses (FBA / template tractography → group stats), (B) focus those same template-space analyses on the subcortex, then (C) go back to native-space subject-specific ACT tractography to compute subject SC and FC inside the subcortex for subject-level structure⇄function analyses and prediction.
-
-
-## some viz
-mrview wmfod_template.mif -odf.load_sh wmfod_template.mif
-mrview wmfod_template.mif -fixel.load fd_smooth/asjt.mif

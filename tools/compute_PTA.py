@@ -41,3 +41,26 @@ for subject in df["subject_ID"].values:
 df["PTA"] = 0.5 * (df["PTA_L"] + df["PTA_R"])
 df = df[['subject_ID', 'group', 'age', 'sex', 'PTA']]
 df.to_csv("../data/master.csv")
+
+
+################# create desing, and contrast matrixes
+df2 = df.copy()
+
+# --- 1) Dummy-code groups (one-hot) ---
+df2['group_T'] = (df2['group'] == 'T').astype(int)
+df2['group_C'] = (df2['group'] == 'C').astype(int)
+df2['age_m'] = df2['age'] - df2['age'].mean()
+df2['PTA_m'] = df2['PTA'] - df2['PTA'].mean()
+
+design_cols = ['group_C', 'group_T', 'age_m', 'sex', 'PTA_m']
+design = df2[design_cols]
+contrast_C_T = np.array([1, -1, 0, 0, 0])
+contrast_T_C = np.array([-1, 1, 0, 0, 0])
+
+df2["subject_ID"] = df2["subject_ID"].astype(str) + ".mif"
+subjects = df2['subject_ID']
+
+subjects.to_csv('subjects.txt', index=False, header=False)
+design.to_csv('design_matrix.txt', sep=' ', index=False, header=False, float_format='%.6f')
+np.savetxt('contrast_C_T.txt', contrast_C_T.reshape(1, -1), fmt='%d', delimiter=' ')
+np.savetxt('contrast_T_C.txt', contrast_T_C.reshape(1, -1), fmt='%d', delimiter=' ')

@@ -215,7 +215,8 @@ create_tractography () {
 
     ## Create exclusion masks (cortical ribbon exclusion)
     mrconvert 5tt_coreg.mif -coord 3 0 ribbon_core.mif
-
+    mrconvert ribbon_core.mif -axes 0,1,2 cortical_ribbon.mif
+    rm ribbon_core.mif
 
     ## Create exclusion masks (convex hull)
     mrconvert Tian_subcortical_dwi_resampled.mif Tian_subcortical_dwi_resampled.nii.gz
@@ -236,34 +237,15 @@ create_tractography () {
     mrcalc cortical_ribbon_reg.mif hull_exclude_reg.mif -add tmp_excl_sum.mif
     mrcalc tmp_excl_sum.mif 0 -gt tmp_excl1.mif
 
+    ## global tractography
+
+    ## subcortical tractography
 
 
 
-    ## Extract subcortical GM mask from 5TT (vol 1) and binarize
-    mrconvert 5tt_coreg.mif 5tt_coreg.nii.gz
-    fslroi 5tt_coreg.nii.gz subcortical_vol.nii.gz 1 1 # extract subcortical volume from the coregistered 5TT
-    fslmaths subcortical_vol.nii.gz -thr 0.5 -bin subcortical_bin.nii.gz
-    mrconvert subcortical_bin.nii.gz subcortical_seed.mif
-
-    ## Create subcortical-specific GMWMI seed
-    mrconvert gmwmSeed_coreg.mif gmwm_all.nii.gz
-    fslmaths subcortical_bin.nii.gz -kernel sphere 1 -dilM subcortical_bin_dil.nii.gz
-    fslmaths gmwm_all.nii.gz -thr 0.5 -bin gmwm_all_bin.nii.gz
-    fslmaths gmwm_all_bin.nii.gz -mul subcortical_bin_dil.nii.gz -bin subcortical_gmwmi.nii.gz
-    mrconvert subcortical_gmwmi.nii.gz subcortical_gmwmi.mif
-
-    seed_voxels=$(mrstats subcortical_gmwmi.mif -output count)
-    echo "Subcortical GMWMI voxels (seed points): $seed_voxels"
 
 
-    ## Create cortical ribbon exclusion mask
-    
-    fslroi 5tt_coreg.nii.gz cortical_vol.nii.gz 0 1
-    fslmaths cortical_vol.nii.gz -thr 0.5 -bin cortical_ribbon.nii.gz
-    mrconvert cortical_ribbon.nii.gz cortical_ribbon.mif
-    mrconvert mask.mif mask.nii.gz
-    fslmaths cortical_ribbon.nii.gz -mul mask.nii.gz cortical_ribbon_inmask.nii.gz
-    mrconvert cortical_ribbon_inmask.nii.gz cortical_ribbon_inmask.mif
+
 
 
     ### global Tractography
@@ -281,10 +263,13 @@ create_tractography () {
                 wmfod.mif \
                 sift_1M.txt
 
+
+}
+
     ## extract some metrics
     fod2fixel wmfod_norm.mif fixel_dir/ -afd fd.mif -mask mask.mif
     tcksample -stat_tck mean -weight sift_coeffs.txt tracks_20M.tck fd.mif mean_fd_weighted.txt
-}
+
 
 # processDTI_4 () {
 
@@ -381,3 +366,6 @@ Using the subcortical GM–WM seeds, we run probabilistic tractography with the 
 ACT ensures that streamlines follow white matter pathways, terminate in GM, and avoid non-brain tissues.
 The result is a tractogram connecting subcortical nuclei, which can be used for connectivity analyses.
 '''
+
+
+### add reports for Mrtrix plots

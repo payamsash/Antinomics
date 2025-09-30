@@ -59,6 +59,10 @@ subsegment () {
     segmentAAN.sh $subject_id
     echo "$(date): AAN segmentation completed for subject $subject_id" >> "$log_file"
 
+    # thalamic nuclei
+    echo -e "\e[32mSegmentation of the thalamic nuclei"
+    segmentThalamicNuclei.sh $subject_id
+
     # hypothalamus
     echo -e "\e[32mSegmentation of the hypothalamus and its associated subunits"
     mri_segment_hypothalamic_subunits --s $subject_id --threads $n_threads

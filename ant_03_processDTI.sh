@@ -11,6 +11,7 @@ export SUBJECTS_DIR=/home/ubuntu/volume/Antinomics/subjects_fs_dir
 export PATH=/home/ubuntu/ants-2.6.2/ants-2.6.2/bin:$PATH
 export LUT_DIR=/usr/local/mrtrix3/share/mrtrix3/labelconvert
 export ANTSPATH=/home/ubuntu/ants-2.6.2/ants-2.6.2/bin
+source $FREESURFER_HOME/SetUpFreeSurfer.sh
 
 preprocessDTI () {
     local subject_id=$1
@@ -132,47 +133,156 @@ create_tractography () {
     local subject_id=$1
     echo "Processing subject: $subject_id"
 
+    ### define paths
     ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
     subject_fs_dir="$SUBJECTS_DIR/$subject_id"
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     raw_anat="$ANTINOMICS_DIR/raws/sMRI_T1/${subject_id}.nii"
+    atlas_dir="/Users/payamsadeghishabestari/Antinomics/data/Tian2020MSA/3T/Subcortex-Only"
+    mni_ref=/Users/payamsadeghishabestari/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz
+    mni_ref_mask=/Users/payamsadeghishabestari/fsl/data/standard/MNI152_T1_1mm_brain_mask.nii.gz
+
     cd $subject_dwi_dir
     
-    ### Registration to anatomical image
+    ### get the b0 image
     mrconvert $raw_anat raw_anat.mif
-    5ttgen hsvs $subject_fs_dir 5tt_nocoreg.mif
     dwiextract dwi_unbiased.mif mean_b0.mif -bzero
     mrconvert mean_b0.mif mean_b0.nii.gz
+
+    ## create 5 tissue type and remove pons from lesion
+    5ttgen hsvs "$subject_fs_dir" 5tt_nocoreg.mif -thalami nuclei -hippocampi aseg
     mrconvert 5tt_nocoreg.mif 5tt_nocoreg.nii.gz
-    fslroi 5tt_nocoreg.nii.gz 5tt_vol0.nii.gz 0 1
+    for i in 0 1 2 3 4; do
+        mrconvert 5tt_nocoreg.mif -coord 3 $i vol${i}.mif
+    done
+    mrcalc vol4.mif 0 -mul vol4_zero.mif
+    mrcat -axis 3 vol0.mif vol1.mif vol2.mif vol3.mif vol4_zero.mif 5tt_fixed.mif
+    rm vol0.mif vol1.mif vol2.mif vol3.mif vol4.mif vol4_zero.mif
+
+    ## Registration to anatomical image
+    fslroi 5tt_fixed.nii.gz 5tt_vol0.nii.gz 0 1
     flirt -in mean_b0.nii.gz \
             -ref 5tt_vol0.nii.gz \
             -interp nearestneighbour \
             -dof 6 \
             -omat diff2struct_fsl.mat
-    
-    ### Generate GM–WM interface for ACT 
-    transformconvert diff2struct_fsl.mat mean_b0.nii.gz 5tt_nocoreg.nii.gz flirt_import diff2struct_mrtrix.txt
-    mrtransform 5tt_nocoreg.mif -linear diff2struct_mrtrix.txt -inverse 5tt_coreg.mif
+
+    ## Generate GM–WM interface for global tractography 
+    transformconvert diff2struct_fsl.mat mean_b0.nii.gz 5tt_fixed.nii.gz flirt_import diff2struct_mrtrix.txt
+    mrtransform 5tt_fixed.mif -linear diff2struct_mrtrix.txt -inverse 5tt_coreg.mif
     5tt2gmwmi 5tt_coreg.mif gmwmSeed_coreg.mif
+
+    ## Register Tian S3 atlas to subject T1 space
+    mkdir t1_temp/
+    mrconvert raw_anat.mif t1_temp/raw_anat.nii.gz
+    cd t1_temp
+    fslreorient2std raw_anat.nii.gz raw_anat_std.nii.gz
+    bet raw_anat_std.nii.gz sub-T1_brain.nii.gz
+    flirt -in sub-T1_brain.nii.gz \
+            -ref $mni_ref \
+            -out sub2MNI_lin \
+            -omat sub2MNI_lin.mat
+
+    fnirt --in=raw_anat_std.nii.gz \
+        --aff=sub2MNI_lin.mat \
+        --ref=$mni_ref \
+        --refmask=$mni_ref_mask \
+        --cout=sub2MNI_warp
+
+    invwarp -w sub2MNI_warp \
+            -r raw_anat_std.nii.gz \
+            -o MNI2sub_warp
+
+    applywarp -i "tian_atlas.nii.gz" \
+                -r "raw_anat_std.nii.gz" \
+                -o "tian_subspace.nii.gz" \
+                -w "MNI2sub_warp" \
+                --interp=nn
+    
+    ## Register Tian S3 atlas to subject DWI space
+    mrconvert tian_subspace.nii.gz ../Tian_subcortical.mif
+    cd ..
+    mrtransform Tian_subcortical.mif \
+                -linear diff2struct_mrtrix.txt \
+                -inverse \
+                -interp nearest \
+                Tian_subcortical_dwi.mif
+
+    ## Generate GM–WM interface for subcortical tractography 
+    mrcalc gmwmSeed_coreg.mif 0.5 -gt gmwmSeed_bin.mif
+    mrgrid Tian_subcortical_dwi.mif regrid -template gmwmSeed_bin.mif -interp nearest Tian_subcortical_dwi_resampled.mif
+    mrcalc gmwmSeed_bin.mif Tian_subcortical_dwi_resampled.mif -mul subcortical_gmwmi_raw.mif
+
+    ## Create exclusion masks (cortical ribbon exclusion)
+    mrconvert 5tt_coreg.mif -coord 3 0 ribbon_core.mif
+
+
+    ## Create exclusion masks (convex hull)
+    mrconvert Tian_subcortical_dwi_resampled.mif Tian_subcortical_dwi_resampled.nii.gz
+    fslmaths Tian_subcortical_dwi_resampled.nii.gz -thr 0.5 -bin Tian_sub_bin.nii.gz
+    fslmaths Tian_sub_bin.nii.gz -kernel sphere 3 -dilM Tian_sub_dil1.nii.gz
+    fslmaths Tian_sub_dil1.nii.gz -kernel sphere 3 -dilM Tian_sub_dil2.nii.gz
+    fslmaths Tian_sub_dil2.nii.gz -kernel sphere 2 -ero Tian_sub_hull.nii.gz
+    mrconvert Tian_sub_hull.nii.gz Tian_sub_hull.mif
+    mrconvert mask.mif mask.nii.gz
+    mrgrid Tian_sub_hull.nii.gz regrid -template mask.mif -interp nearest Tian_sub_hull_resampled.mif
+    mrconvert Tian_sub_hull_resampled.mif Tian_sub_hull_resampled.nii.gz
+    fslmaths mask.nii.gz -sub Tian_sub_hull_resampled.nii.gz -bin hull_exclude.nii.gz
+    mrconvert hull_exclude.nii.gz hull_exclude.mif
+
+    ## create exclusion mask (cortical ribbon + convex hull)
+    mrgrid cortical_ribbon.mif regrid -template mask.mif -interp nearest cortical_ribbon_reg.mif
+    mrgrid hull_exclude.mif regrid -template mask.mif -interp nearest hull_exclude_reg.mif
+    mrcalc cortical_ribbon_reg.mif hull_exclude_reg.mif -add tmp_excl_sum.mif
+    mrcalc tmp_excl_sum.mif 0 -gt tmp_excl1.mif
+
+
+
+
+    ## Extract subcortical GM mask from 5TT (vol 1) and binarize
+    mrconvert 5tt_coreg.mif 5tt_coreg.nii.gz
+    fslroi 5tt_coreg.nii.gz subcortical_vol.nii.gz 1 1 # extract subcortical volume from the coregistered 5TT
+    fslmaths subcortical_vol.nii.gz -thr 0.5 -bin subcortical_bin.nii.gz
+    mrconvert subcortical_bin.nii.gz subcortical_seed.mif
+
+    ## Create subcortical-specific GMWMI seed
+    mrconvert gmwmSeed_coreg.mif gmwm_all.nii.gz
+    fslmaths subcortical_bin.nii.gz -kernel sphere 1 -dilM subcortical_bin_dil.nii.gz
+    fslmaths gmwm_all.nii.gz -thr 0.5 -bin gmwm_all_bin.nii.gz
+    fslmaths gmwm_all_bin.nii.gz -mul subcortical_bin_dil.nii.gz -bin subcortical_gmwmi.nii.gz
+    mrconvert subcortical_gmwmi.nii.gz subcortical_gmwmi.mif
+
+    seed_voxels=$(mrstats subcortical_gmwmi.mif -output count)
+    echo "Subcortical GMWMI voxels (seed points): $seed_voxels"
+
+
+    ## Create cortical ribbon exclusion mask
+    
+    fslroi 5tt_coreg.nii.gz cortical_vol.nii.gz 0 1
+    fslmaths cortical_vol.nii.gz -thr 0.5 -bin cortical_ribbon.nii.gz
+    mrconvert cortical_ribbon.nii.gz cortical_ribbon.mif
+    mrconvert mask.mif mask.nii.gz
+    fslmaths cortical_ribbon.nii.gz -mul mask.nii.gz cortical_ribbon_inmask.nii.gz
+    mrconvert cortical_ribbon_inmask.nii.gz cortical_ribbon_inmask.mif
+
 
     ### global Tractography
     tckgen -act 5tt_coreg.mif \
                 -backtrack \
                 -seed_gmwmi gmwmSeed_coreg.mif \
                 -select 10000000 \
-                wmfod_norm.mif \
+                wmfod.mif \
                 tracks_10M.tck
 
     tcksift2 -act 5tt_coreg.mif \
                 -out_mu sift_mu.txt \
                 -out_coeffs sift_coeffs.txt \
                 tracks_10M.tck \
-                wmfod_norm.mif \
+                wmfod.mif \
                 sift_1M.txt
 
     ## extract some metrics
-    fod2fixel wmfod.mif fixel_dir/ -afd fd.mif -mask mask.mif
+    fod2fixel wmfod_norm.mif fixel_dir/ -afd fd.mif -mask mask.mif
     tcksample -stat_tck mean -weight sift_coeffs.txt tracks_20M.tck fd.mif mean_fd_weighted.txt
 }
 
@@ -233,3 +343,41 @@ for t1_file in /home/ubuntu/volume/Antinomics/raws/sMRI_T1/*.nii; do
     fi
 done
 
+
+
+'''
+Goal:
+We want to reconstruct white matter tracts that connect subcortical nuclei (thalamus, basal ganglia, hippocampus, amygdala, etc.) while avoiding cortical regions or other unwanted areas.
+1️⃣ Start with an atlas of subcortical regions
+The Tian atlas provides a detailed map of subcortical nuclei in standard (MNI) space.
+These nuclei are the “regions of interest” we want to seed for tractography.
+We choose a scale (e.g., S3) that balances anatomical detail and seed robustness.
+2️⃣ Bring the atlas into the subject’s native anatomical space
+Every subject’s brain is slightly different in size, shape, and orientation.
+We warp the atlas to the subject’s T1-weighted MRI so that the labels correctly match their subcortical anatomy.
+Nonlinear registration is ideal here because it allows small nuclei to line up accurately with the subject’s brain.
+3️⃣ Bring the labels into diffusion space
+Tractography is performed on diffusion-weighted images (DWI).
+We need to map the subcortical labels from T1 space into DWI space, so the seeds are in the correct location relative to the diffusion data.
+4️⃣ Restrict seeds to the GM–WM interface
+Streamlines are generated from the interface between gray matter and white matter, not deep inside gray matter or in CSF.
+By multiplying the subcortical labels with a GM–WM interface mask, we ensure that seeds start from just inside the white matter connected to the subcortical nuclei.
+5️⃣ Optional exclusion masks
+Cortical ribbon mask: prevents streamlines from entering cortex.
+Convex hull mask around subcortical structures: prevents streamlines from leaving the subcortical area too far.
+These help constrain the tractogram to subcortical–subcortical connections, avoiding contamination from cortical or CSF regions.
+
+When you seed from the GM–WM interface near subcortical regions (e.g. thalamus, striatum, hippocampus), streamlines can sometimes:
+Leak into the cortical ribbon (i.e. grey matter sheet on the surface).
+Shoot into CSF or outside the brain if the mask has imperfections.
+Create spurious loops across sulci/gyri because the seeds are near boundaries.
+👉 To prevent this, you add exclusion masks: regions where streamlines are not allowed to go.
+If a streamline enters an exclusion mask, it gets terminated.
+
+
+
+6️⃣ Generate the tractogram
+Using the subcortical GM–WM seeds, we run probabilistic tractography with the ACT framework (anatomically constrained tractography).
+ACT ensures that streamlines follow white matter pathways, terminate in GM, and avoid non-brain tissues.
+The result is a tractogram connecting subcortical nuclei, which can be used for connectivity analyses.
+'''

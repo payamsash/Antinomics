@@ -211,7 +211,7 @@ create_tractography () {
     ## Generate GM–WM interface for subcortical tractography 
     mrcalc gmwmSeed_coreg.mif 0.5 -gt gmwmSeed_bin.mif
     mrgrid Tian_subcortical_dwi.mif regrid -template gmwmSeed_bin.mif -interp nearest Tian_subcortical_dwi_resampled.mif
-    mrcalc gmwmSeed_bin.mif Tian_subcortical_dwi_resampled.mif -mul subcortical_gmwmi_raw.mif
+    mrcalc gmwmSeed_bin.mif Tian_subcortical_dwi_resampled.mif -mul subcortical_gmwmi.mif
 
     ## Create exclusion masks (cortical ribbon exclusion)
     mrconvert 5tt_coreg.mif -coord 3 0 ribbon_core.mif
@@ -237,24 +237,30 @@ create_tractography () {
     mrcalc cortical_ribbon_reg.mif hull_exclude_reg.mif -add tmp_excl_sum.mif
     mrcalc tmp_excl_sum.mif 0 -gt tmp_excl1.mif
 
-    ## global tractography
-
     ## subcortical tractography
+    voxsize=$(mrinfo wmfod.mif -spacing | awk '{print $1}')
+    step=$(echo "$voxsize * 0.25" | bc -l)
+    tckgen -algorithm iFoD2 \
+            -act 5tt_coreg.mif \
+            -backtrack \
+            -angle 45 \
+            -select 10000000 \
+            -step $step \
+            -exclude cortical_ribbon_reg.mif \
+            -exclude hull_exclude_reg.mif \
+            -seed_image subcortical_gmwmi.mif \
+            wmfod.mif \
+            subcortical_tracks_10M.tck
 
-
-
-
-
-
-
-
-    ### global Tractography
-    tckgen -act 5tt_coreg.mif \
-                -backtrack \
-                -seed_gmwmi gmwmSeed_coreg.mif \
-                -select 10000000 \
-                wmfod.mif \
-                tracks_10M.tck
+    ## global Tractography
+    tckgen -algorithm iFoD2 \
+            -act 5tt_coreg.mif \
+            -backtrack \
+            -angle 45 \
+            -select 10000000 \
+            -seed_gmwmi gmwmSeed_coreg.mif \
+            wmfod.mif \
+            tracks_10M.tck
 
     tcksift2 -act 5tt_coreg.mif \
                 -out_mu sift_mu.txt \

@@ -5,7 +5,7 @@
 # email: payam.sadeghishabestari@uzh.ch
 # This script is written mainly for Antinomics project. However It could be used for other purposes.
 
-set -euo pipefail
+set -e
 export FREESURFER_HOME=/usr/local/freesurfer/8.0.0
 export SUBJECTS_DIR=/home/ubuntu/volume/Antinomics/subjects_fs_dir
 export PATH=/home/ubuntu/ants-2.6.2/ants-2.6.2/bin:$PATH
@@ -138,9 +138,9 @@ create_tractography () {
     subject_fs_dir="$SUBJECTS_DIR/$subject_id"
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     raw_anat="$ANTINOMICS_DIR/raws/sMRI_T1/${subject_id}.nii"
-    atlas_dir="/Users/payamsadeghishabestari/Antinomics/data/Tian2020MSA/3T/Subcortex-Only"
-    mni_ref=/Users/payamsadeghishabestari/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz
-    mni_ref_mask=/Users/payamsadeghishabestari/fsl/data/standard/MNI152_T1_1mm_brain_mask.nii.gz
+    atlas_dir="/home/ubuntu/volume/Tian_atlas"
+    mni_ref="/home/ubuntu/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz"
+    mni_ref_mask="/home/ubuntu/fsl/data/standard/MNI152_T1_1mm_brain_mask.nii.gz"
 
     cd $subject_dwi_dir
     
@@ -151,7 +151,6 @@ create_tractography () {
 
     ## create 5 tissue type and remove pons from lesion
     5ttgen hsvs "$subject_fs_dir" 5tt_nocoreg.mif -thalami nuclei -hippocampi aseg
-    mrconvert 5tt_nocoreg.mif 5tt_nocoreg.nii.gz
     for i in 0 1 2 3 4; do
         mrconvert 5tt_nocoreg.mif -coord 3 $i vol${i}.mif
     done
@@ -160,6 +159,7 @@ create_tractography () {
     rm vol0.mif vol1.mif vol2.mif vol3.mif vol4.mif vol4_zero.mif
 
     ## Registration to anatomical image
+    mrconvert 5tt_fixed.mif 5tt_fixed.nii.gz
     fslroi 5tt_fixed.nii.gz 5tt_vol0.nii.gz 0 1
     flirt -in mean_b0.nii.gz \
             -ref 5tt_vol0.nii.gz \
@@ -193,7 +193,7 @@ create_tractography () {
             -r raw_anat_std.nii.gz \
             -o MNI2sub_warp
 
-    applywarp -i "tian_atlas.nii.gz" \
+    applywarp -i "$atlas_dir/Tian_Subcortex_S3_3T_1mm.nii.gz" \
                 -r "raw_anat_std.nii.gz" \
                 -o "tian_subspace.nii.gz" \
                 -w "MNI2sub_warp" \
@@ -201,7 +201,7 @@ create_tractography () {
     
     ## Register Tian S3 atlas to subject DWI space
     mrconvert tian_subspace.nii.gz ../Tian_subcortical.mif
-    cd ..
+    cd $subject_dwi_dir
     mrtransform Tian_subcortical.mif \
                 -linear diff2struct_mrtrix.txt \
                 -inverse \
@@ -216,7 +216,7 @@ create_tractography () {
     ## Create exclusion masks (cortical ribbon exclusion)
     mrconvert 5tt_coreg.mif -coord 3 0 ribbon_core.mif
     mrconvert ribbon_core.mif -axes 0,1,2 cortical_ribbon.mif
-    rm ribbon_core.mif
+    
 
     ## Create exclusion masks (convex hull)
     mrconvert Tian_subcortical_dwi_resampled.mif Tian_subcortical_dwi_resampled.nii.gz
@@ -234,8 +234,6 @@ create_tractography () {
     ## create exclusion mask (cortical ribbon + convex hull)
     mrgrid cortical_ribbon.mif regrid -template mask.mif -interp nearest cortical_ribbon_reg.mif
     mrgrid hull_exclude.mif regrid -template mask.mif -interp nearest hull_exclude_reg.mif
-    mrcalc cortical_ribbon_reg.mif hull_exclude_reg.mif -add tmp_excl_sum.mif
-    mrcalc tmp_excl_sum.mif 0 -gt tmp_excl1.mif
 
     ## subcortical tractography
     voxsize=$(mrinfo wmfod.mif -spacing | awk '{print $1}')
@@ -250,7 +248,14 @@ create_tractography () {
             -exclude hull_exclude_reg.mif \
             -seed_image subcortical_gmwmi.mif \
             wmfod.mif \
-            subcortical_tracks_10M.tck
+            tracks_subcortical_10M.tck
+
+    tcksift2 -act 5tt_coreg.mif \
+            -out_mu sift_subcortical_mu.txt \
+            -out_coeffs sift_subcortical_coeffs.txt \
+            tracks_subcortical_10M.tck \
+            wmfod.mif \
+            sift_subcortical_1M.txt
 
     ## global Tractography
     tckgen -algorithm iFoD2 \
@@ -263,14 +268,29 @@ create_tractography () {
             tracks_10M.tck
 
     tcksift2 -act 5tt_coreg.mif \
-                -out_mu sift_mu.txt \
-                -out_coeffs sift_coeffs.txt \
-                tracks_10M.tck \
-                wmfod.mif \
-                sift_1M.txt
+            -out_mu sift_mu.txt \
+            -out_coeffs sift_coeffs.txt \
+            tracks_10M.tck \
+            wmfod.mif \
+            sift_1M.txt
 
-
+    ## cleaning
+    rm -r t1_temp
+    rm 5tt_fixed.nii.gz 5tt_vol0.nii.gz
+    rm Tian_sub_bin.nii.gz \
+        Tian_sub_dil1.nii.gz \
+        Tian_sub_dil2.nii.gz \
+        Tian_sub_hull.mif \
+        Tian_sub_hull.nii.gz \
+        Tian_sub_hull_resampled.mif \
+        Tian_sub_hull_resampled.nii.gz \
+        Tian_subcortical_dwi.mif \
+        Tian_subcortical_dwi_resampled.nii.gz
+    rm bias.mif cortical_ribbon.mif \
+        dwi_den.mif dwi_gibb.mif noise.mif mask.nii.gz \
+        mean_b0.mif residual.mif ribbon_core.mif
 }
+
 
     ## extract some metrics
     fod2fixel wmfod_norm.mif fixel_dir/ -afd fd.mif -mask mask.mif
@@ -372,6 +392,3 @@ Using the subcortical GM–WM seeds, we run probabilistic tractography with the 
 ACT ensures that streamlines follow white matter pathways, terminate in GM, and avoid non-brain tissues.
 The result is a tractogram connecting subcortical nuclei, which can be used for connectivity analyses.
 '''
-
-
-### add reports for Mrtrix plots

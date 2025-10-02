@@ -315,7 +315,7 @@ create_connectome () {
     cd $subject_dwi_dir
     transformcalc diff2struct_mrtrix.txt invert struct2diff_mrtrix.txt
 
-    for n_roi in [400, 800, 1000]:
+    for n_roi in [100, 200, 400, 800, 1000]:
         for n_network in [7, 17]:
 
             mrconvert $subject_fs_dir/mri/Schaefer2018_${n_roi}_${n_network}Networks.mgz \
@@ -446,3 +446,12 @@ Using the subcortical GM–WM seeds, we run probabilistic tractography with the 
 ACT ensures that streamlines follow white matter pathways, terminate in GM, and avoid non-brain tissues.
 The result is a tractogram connecting subcortical nuclei, which can be used for connectivity analyses.
 '''
+
+## remove 17 network
+## add 100, 200 schaefer
+## make proper foldering
+## run aparc2aseg for all and move it to subsegment
+## run connectome and proper foldering for it
+## tian atlas
+## glasser atlas
+## connectome2tck plots

@@ -340,8 +340,26 @@ create_connectome () {
 
             tck2connectome tracks_10M.tck \
                             Schaefer2018_400_7Networks_DWI_converted.mif \
-                            connectome_400.csv \
-                            -assignment_radial_search 2
+                            sch_400_conn.csv \
+                            -tck_weights_in sift_1M.txt \
+                            -out_assignment sch_400_7n_assign.txt \
+                            -symmetric \
+                            -zero_diagonal \
+                            -scale_invnodevol
+            
+            ## only for 1 subject
+            connectome2tck tracks_10M.tck \
+                            sch_400_7n_assign.txt \
+                            sch_${n}Parcels_7Networks_edge_exemplar.tck \
+                            -files single \
+                            -exemplars Schaefer2018_400_7Networks_DWI_converted.mif
+
+
+            label2mesh Schaefer2018_400_7Networks_DWI_converted.mif mesh_400.obj
+            meshfilter mesh_400.obj smooth mesh_400_smooth.obj
+
+
+            
 }
 
 
@@ -455,3 +473,6 @@ The result is a tractogram connecting subcortical nuclei, which can be used for 
 ## tian atlas
 ## glasser atlas
 ## connectome2tck plots
+
+## mrview Schaefer2018_400_7Networks_DWI_converted.mif -connectome.init Schaefer2018_400_7Networks_DWI_converted.mif -connectome.load sch_400_conn.csv
+## So for instance: You could load a structural connectome file as your connectome matrix and show only those edges where the connection density is above a certain threshold, but then set the colour of each edge based on a different matrix file that contains functional connectivity values.

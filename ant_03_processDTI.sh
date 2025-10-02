@@ -292,9 +292,58 @@ create_tractography () {
 }
 
 
-    ## extract some metrics
-    fod2fixel wmfod_norm.mif fixel_dir/ -afd fd.mif -mask mask.mif
-    tcksample -stat_tck mean -weight sift_coeffs.txt tracks_20M.tck fd.mif mean_fd_weighted.txt
+create_connectome () {
+    local subject_id=$1
+    echo "Processing subject: $subject_id"
+
+    ### define paths
+    ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
+    subject_fs_dir="$SUBJECTS_DIR/$subject_id"
+    subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
+    lut_dir="/home/ubuntu/volume/Schaefer_atlas"
+
+    # bring schaefer from surface to volume
+    cd $subject_fs_dir/mri
+    for n_roi in [400, 800, 1000]:
+        for n_network in [7, 17]:
+            mri_aparc2aseg \
+                            --s $subject_id \
+                            --annot Schaefer2018_${n_roi}Parcels_${n_network}Networks_order \
+                            --o ./mri/Schaefer2018_${n_roi}_${n_network}Networks.mgz
+
+    # now convert it and bring it to diffusion space
+    cd $subject_dwi_dir
+    transformcalc diff2struct_mrtrix.txt invert struct2diff_mrtrix.txt
+
+    for n_roi in [400, 800, 1000]:
+        for n_network in [7, 17]:
+
+            mrconvert $subject_fs_dir/mri/Schaefer2018_${n_roi}_${n_network}Networks.mgz \
+                        Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
+
+            mrtransform \
+                        Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
+                        -linear struct2diff_mrtrix.txt \
+                        -interp nearest \
+                        Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif
+
+            mrcalc Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif 0.5 -add -floor Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
+
+            labelconvert \
+                Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif \
+                $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order_LUT.txt \
+                $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order.txt \
+                Schaefer2018_${n_roi}_${n_network}Networks_DWI_int_converted.mif
+
+            rm Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif \
+                Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
+
+            tck2connectome tracks_10M.tck \
+                            Schaefer2018_400_7Networks_DWI_converted.mif \
+                            connectome_400.csv \
+                            -assignment_radial_search 2
+}
+
 
 
 # processDTI_4 () {
@@ -346,6 +395,11 @@ create_tractography () {
 #     done
 # mrtrix_cleanup $subject_dwi_dir
 # }
+
+## extract some metrics
+    fod2fixel wmfod_norm.mif fixel_dir/ -afd fd.mif -mask mask.mif
+    tcksample -stat_tck mean -weight sift_coeffs.txt tracks_20M.tck fd.mif mean_fd_weighted.txt
+
 
 for t1_file in /home/ubuntu/volume/Antinomics/raws/sMRI_T1/*.nii; do
     subject_id=$(basename "$t1_file" .nii)

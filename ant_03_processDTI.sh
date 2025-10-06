@@ -139,8 +139,8 @@ create_tractography () {
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     raw_anat="$ANTINOMICS_DIR/raws/sMRI_T1/${subject_id}.nii"
     atlas_dir="/home/ubuntu/volume/Tian_atlas"
-    mni_ref="/home/ubuntu/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz"
-    mni_ref_mask="/home/ubuntu/fsl/data/standard/MNI152_T1_1mm_brain_mask.nii.gz"
+    mni_ref="./data/MNI152NLin6Asym_1mm.nii.gz"
+    mni_ref_mask="./data/MNI152NLin6Asym_1mm_brain.nii.gz"
 
     cd $subject_dwi_dir
     
@@ -193,11 +193,23 @@ create_tractography () {
             -r raw_anat_std.nii.gz \
             -o MNI2sub_warp
 
-    applywarp -i "$atlas_dir/Tian_Subcortex_S3_3T_1mm.nii.gz" \
-                -r "raw_anat_std.nii.gz" \
-                -o "tian_subspace.nii.gz" \
-                -w "MNI2sub_warp" \
-                --interp=nn
+    
+    for scale in S1 S2 S3 S4; do
+        atlas_file="$atlas_dir/Tian_Subcortex_${scale}_3T_1mm.nii.gz"
+        out_t1="tian_${scale}_subspace.nii.gz"
+        out_dwi="tian_${scale}_dwi.mif"
+
+        # Apply warp: MNI -> T1
+        applywarp -i "$atlas_file" -r "raw_anat_std.nii.gz" -o "$out_t1" -w "MNI2sub_warp" --interp=nn
+
+        # Convert to MRtrix and transform to DWI space
+        mrconvert "$out_t1" "${out_t1%.nii.gz}.mif"
+        mrtransform "${out_t1%.nii.gz}.mif" -linear ../diff2struct_mrtrix.txt -inverse -interp nearest "$out_dwi"
+    done
+    
+    
+    
+    
     
     ## Register Tian S3 atlas to subject DWI space
     mrconvert tian_subspace.nii.gz ../Tian_subcortical.mif
@@ -371,6 +383,8 @@ create_connectome () {
                         -scale_invnodevol
 
     if atlas == "Tian":
+        for scale in 1 2 3 4:
+
 
 
 }

@@ -294,6 +294,7 @@ create_tractography () {
 
 create_connectome () {
     local subject_id=$1
+    local atlas=$2 
     echo "Processing subject: $subject_id"
 
     ### define paths
@@ -301,34 +302,38 @@ create_connectome () {
     subject_fs_dir="$SUBJECTS_DIR/$subject_id"
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     lut_dir="/home/ubuntu/volume/Schaefer_atlas"
+    mrtrix_home="/usr/local/mrtrix3"
 
 
     # now convert it and bring it to diffusion space
     cd $subject_dwi_dir
     transformcalc diff2struct_mrtrix.txt invert struct2diff_mrtrix.txt
 
-    for n_roi in 100 200 400 800 1000:
-            mrconvert $subject_fs_dir/mri/Schaefer2018_${n_roi}_7Networks.mgz \
-                        Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
+    if atlas == "Schaefer":
 
-            mrtransform \
-                        Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
-                        -linear struct2diff_mrtrix.txt \
-                        -interp nearest \
-                        Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif
+        for n_roi in 100 200 400 800 1000:
+                mrconvert --datatype uint32 \
+                            $subject_fs_dir/mri/Schaefer2018_${n_roi}_7Networks.mgz \
+                            Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
 
-            mrcalc Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif 0.5 -add -floor Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
+                mrtransform \
+                            Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
+                            -linear struct2diff_mrtrix.txt \
+                            -interp nearest \
+                            Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif
 
-            labelconvert \
-                Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif \
-                $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order_LUT.txt \
-                $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order.txt \
-                Schaefer2018_${n_roi}_${n_network}Networks_DWI_int_converted.mif
+                mrcalc Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif 0.5 -add -floor Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
 
-            rm Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif \
-                Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
+                labelconvert \
+                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif \
+                    $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order_LUT.txt \
+                    $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order.txt \
+                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int_converted.mif
 
-            tck2connectome tracks_10M.tck \
+                rm Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif \
+                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
+
+                tck2connectome tracks_10M.tck \
                             Schaefer2018_400_7Networks_DWI_converted.mif \
                             sch_400_conn.csv \
                             -tck_weights_in sift_1M.txt \
@@ -336,6 +341,42 @@ create_connectome () {
                             -symmetric \
                             -zero_diagonal \
                             -scale_invnodevol
+
+    if atlas == "Glasser":
+        mrconvert --datatype uint32 \
+                    "${subject_fs_dir}/mri/HCPMMP1.mgz" \
+                    HCPMMP1_T1.mif
+
+        mrtransform HCPMMP1_T1.mif \
+                    -linear struct2diff_mrtrix.txt \
+                    -interp nearest \
+                    HCPMMP1_DWI.mif
+        mrcalc HCPMMP1_DWI.mif 0.5 -add -floor HCPMMP1_DWI_int.mif
+
+        labelconvert \
+                    HCPMMP1_DWI.mif \
+                    $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_original.txt \
+                    $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_ordered.txt \
+                    HCPMMP1_DWI_int_converted.mif
+
+        rm HCPMMP1_DWI.mif HCPMMP1_DWI_int.mif
+
+        tck2connectome tracks_10M.tck \
+                        HCPMMP1_DWI_int_converted.mif \
+                        glasser.csv \
+                        -tck_weights_in sift_1M.txt \
+                        -out_assignment glasser_assign.txt \
+                        -symmetric \
+                        -zero_diagonal \
+                        -scale_invnodevol
+
+    if atlas == "Tian":
+
+
+}
+
+
+
             
             ## only for 1 subject
             connectome2tck tracks_10M.tck \
@@ -347,60 +388,6 @@ create_connectome () {
 
             label2mesh Schaefer2018_400_7Networks_DWI_converted.mif mesh_400.obj
             meshfilter mesh_400.obj smooth mesh_400_smooth.obj
-
-}
-
-
-
-# processDTI_4 () {
-
-#     ## Create a Connectome for Atlases (pending from here)
-#     labelconvert $subject_fs_dir/mri/aparc+aseg.mgz \
-#                     $FREESURFER_HOME/FreeSurferColorLUT.txt \
-#                     $LUT_DIR/fs_default.txt \
-#                     aparc_parcels.mif
-#     labelconvert $subject_fs_dir/mri/aparc.a2009s+aseg.mgz \
-#                     $FREESURFER_HOME/FreeSurferColorLUT.txt \
-#                     $LUT_DIR/fs_a2009s.txt \
-#                     aparc2009s_parcels.mif
-
-#     parcels=("aparc" "aparc.a2009s" "schaefer")
-#     for parc in "${parcels[@]}"; do
-#         if [[ $parc == "aparc" || $parc == "aparc.a2009s"]]; then
-#             labelconvert $subject_fs_dir/mri/${parc}+aseg.mgz \
-#                     $FREESURFER_HOME/FreeSurferColorLUT.txt \
-#                     $LUT_DIR/fs_default.txt \
-#                     ${parc}_parcels.mif
-            
-#             tck2connectome -symmetric -zero_diagonal -scale_invnodevol -tck_weights_in \
-#                         sift_1M.txt tracks_10M.tck ${parc}_parcels.mif ${parc}_parcels_connectome.csv \
-#                         -out_assignment ${parc}_parcels_assignments.txt
-#             label2mesh ${parc}_parcels.mif ${parc}_parcels_mesh.obj
-#             meshfilter ${parc}_parcels_mesh.obj smooth ${parc}_parcels_mesh_smoothed.obj
-#             connectome2tck tracks_10M.tck ${parc}_parcels_assignments.txt ${parc}_parcels_edge_exemplar.tck \
-#                             -files single -exemplars ${parc}_parcels.mif
-#         fi
-
-#         if [[ $parc == "schaefer" ]]; then
-#             for n in 400 800 1000; do
-                
-#                     mrconvert $subject_fs_dir/schaefer/${n}Parcels_7Networks.mgz sch_${n}Parcels_7Networks.mif
-
-#                     tck2connectome -symmetric -zero_diagonal -scale_invnodevol -tck_weights_in \
-#                                         sift_1M.txt tracks_10M.tck sch_${n}Parcels_7Networks.mif \
-#                                         sch_${n}Parcels_7Networks_connectome.csv \
-#                                         -out_assignment sch_${n}Parcels_7Networks_assignments.txt
-#                     label2mesh sch_${n}Parcels_7Networks.mif sch_${n}Parcels_7Networks_mesh.obj
-#                     meshfilter sch_${n}Parcels_7Networks_mesh.obj smooth sch_${n}Parcels_7Networks_mesh_smoothed.obj
-#                     connectome2tck tracks_10M.tck sch_${n}Parcels_7Networks_assignments.txt \
-#                                     sch_${n}Parcels_7Networks_edge_exemplar.tck -files single \
-#                                     -exemplars sch_${n}Parcels_7Networks.mif
-#                 done
-#             done
-#         fi
-#     done
-# mrtrix_cleanup $subject_dwi_dir
-# }
 
 ## extract some metrics
     fod2fixel wmfod_norm.mif fixel_dir/ -afd fd.mif -mask mask.mif

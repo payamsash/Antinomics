@@ -302,23 +302,13 @@ create_connectome () {
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     lut_dir="/home/ubuntu/volume/Schaefer_atlas"
 
-    # bring schaefer from surface to volume
-    cd $subject_fs_dir/mri
-    for n_roi in [400, 800, 1000]:
-        for n_network in [7, 17]:
-            mri_aparc2aseg \
-                            --s $subject_id \
-                            --annot Schaefer2018_${n_roi}Parcels_${n_network}Networks_order \
-                            --o ./mri/Schaefer2018_${n_roi}_${n_network}Networks.mgz
 
     # now convert it and bring it to diffusion space
     cd $subject_dwi_dir
     transformcalc diff2struct_mrtrix.txt invert struct2diff_mrtrix.txt
 
-    for n_roi in [100, 200, 400, 800, 1000]:
-        for n_network in [7, 17]:
-
-            mrconvert $subject_fs_dir/mri/Schaefer2018_${n_roi}_${n_network}Networks.mgz \
+    for n_roi in 100 200 400 800 1000:
+            mrconvert $subject_fs_dir/mri/Schaefer2018_${n_roi}_7Networks.mgz \
                         Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
 
             mrtransform \
@@ -358,8 +348,6 @@ create_connectome () {
             label2mesh Schaefer2018_400_7Networks_DWI_converted.mif mesh_400.obj
             meshfilter mesh_400.obj smooth mesh_400_smooth.obj
 
-
-            
 }
 
 

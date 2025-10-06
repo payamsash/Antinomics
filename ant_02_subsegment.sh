@@ -114,19 +114,33 @@ subsegment () {
 
     # schaefer atlas
     echo -e "\e[32mSchaefer2018 parcellation in individual surface space!"
-    for n in 400 800 1000; do
-        for net_option in 7 17; do
-            for hemi in "${hemis[@]}"; do
-                mris_ca_label -l $SUBJECTS_DIR/$subject_id/label/${hemi}.cortex.label \
+    for n in 100 200 400 800 1000; do
+        for hemi in "${hemis[@]}"; do
+            mris_ca_label -l $SUBJECTS_DIR/$subject_id/label/${hemi}.cortex.label \
                                 $subject_id \
                                 ${hemi} \
                                 $SUBJECTS_DIR/$subject_id/surf/${hemi}.sphere.reg \
-                                $sch_gcs_dir/${hemi}.Schaefer2018_${n}Parcels_${net_option}Networks.gcs \
-                                $SUBJECTS_DIR/$subject_id/label/${hemi}.Schaefer2018_${n}Parcels_${net_option}Networks_order.annot
-                echo "$(date): Schaefer parcellation with $n labels in $hemi completed for subject $subject_id" >> "$log_file"
-            done
+                                $sch_gcs_dir/${hemi}.Schaefer2018_${n}Parcels_7Networks.gcs \
+                                $SUBJECTS_DIR/$subject_id/label/${hemi}.Schaefer2018_${n}Parcels_7Networks_order.annot
+            echo "$(date): Schaefer parcellation with $n labels in $hemi completed for subject $subject_id" >> "$log_file"
+    
+            mri_aparc2aseg --s $subject_id \
+                            --annot Schaefer2018_${n}Parcels_7Networks_order \
+                            --o $SUBJECTS_DIR/$subject_id/mri/Schaefer2018_${n}_7Networks.mgz
+    
         done
     done
+    
+    # bring schaefer from surface to volume
+    cd $subject_fs_dir/mri
+    for n_roi in [400, 800, 1000]:
+        for n_network in [7, 17]:
+            mri_aparc2aseg \
+                            --s $subject_id \
+                            --annot Schaefer2018_${n_roi}Parcels_${n_network}Networks_order \
+                            --o ./mri/Schaefer2018_${n_roi}_${n_network}Networks.mgz
+
+
 }
 
 ## main part

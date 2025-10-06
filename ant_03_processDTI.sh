@@ -13,6 +13,8 @@ export LUT_DIR=/usr/local/mrtrix3/share/mrtrix3/labelconvert
 export ANTSPATH=/home/ubuntu/ants-2.6.2/ants-2.6.2/bin
 source $FREESURFER_HOME/SetUpFreeSurfer.sh
 
+######################## PREPROCESSING ########################
+
 preprocessDTI () {
     local subject_id=$1
     echo "Processing subject: $subject_id"
@@ -21,7 +23,7 @@ preprocessDTI () {
 
     ## set paths
     ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
-    mkdir "$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
+    mkdir -p "$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     subject_fs_dir="$SUBJECTS_DIR/$subject_id"
     raw_dwi="$ANTINOMICS_DIR/raws/dMRI/${subject_id}.rec"
@@ -31,7 +33,6 @@ preprocessDTI () {
     dcm2niix -f raw_dwi -o $subject_dwi_dir $raw_dwi
     cd $subject_dwi_dir
     mrconvert raw_dwi.nii raw_dwi.mif -fslgrad raw_dwi.bvec raw_dwi.bval
-    echo -e "\e[32mConverted to nifti and mif formats successfuly!"
 
     ### Preprocessing
     dwidenoise raw_dwi.mif dwi_den.mif -noise noise.mif
@@ -40,9 +41,187 @@ preprocessDTI () {
     dwifslpreproc dwi_gibb.mif dwi_preproc.mif -pe_dir ap -rpe_none  # roger says its okay
     dwibiascorrect ants dwi_preproc.mif dwi_unbiased.mif -bias bias.mif 
     echo -e "\e[32mPreprocessing is done successfuly!"
-    dwi2mask dwi_preproc.mif mask.mif
+    dwi2mask dwi_unbiased.mif mask.mif
+
+    rm noise.mif residual.mif dwi_den.mif dwi_gibb.mif dwi_preproc.mif bias.mif
     mrtrix_cleanup $subject_dwi_dir
 }
+
+######################## TRACTOGRAPHY ########################
+
+create_tractography () {
+    local subject_id=$1
+    echo "Processing subject: $subject_id"
+
+    ### set paths
+    ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
+    subject_fs_dir="$SUBJECTS_DIR/$subject_id"
+    subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
+    raw_anat="$ANTINOMICS_DIR/raws/sMRI_T1/${subject_id}.nii"
+    tian_atlas_dir="/home/ubuntu/volume/tools/Tian_atlas"
+    mni_ref="/home/ubuntu/volume/tools/MNI152NLin6Asym_1mm.nii.gz"
+    mni_ref_mask="/home/ubuntu/volume/tools/MNI152NLin6Asym_1mm_brain.nii.gz"
+
+    cd $subject_dwi_dir
+    
+    ### get the b0 image
+    mrconvert $raw_anat raw_anat.mif
+    dwiextract dwi_unbiased.mif mean_b0.mif -bzero
+    mrconvert mean_b0.mif mean_b0.nii.gz
+
+    ## create 5 tissue type and remove pons from lesion
+    5ttgen hsvs "$subject_fs_dir" 5tt_nocoreg.mif -thalami nuclei -hippocampi aseg
+    for i in 0 1 2 3 4; do
+        mrconvert 5tt_nocoreg.mif -coord 3 $i vol${i}.mif
+    done
+    mrcalc vol4.mif 0 -mul vol4_zero.mif
+    mrcat -axis 3 vol0.mif vol1.mif vol2.mif vol3.mif vol4_zero.mif 5tt_fixed.mif
+    rm vol0.mif vol1.mif vol2.mif vol3.mif vol4.mif vol4_zero.mif
+
+    ## Registration to anatomical image
+    mrconvert 5tt_fixed.mif 5tt_fixed.nii.gz
+    fslroi 5tt_fixed.nii.gz 5tt_vol0.nii.gz 0 1
+    flirt -in mean_b0.nii.gz \
+            -ref 5tt_vol0.nii.gz \
+            -interp nearestneighbour \
+            -dof 6 \
+            -omat diff2struct_fsl.mat
+
+    ## Generate GM–WM interface for global tractography 
+    transformconvert diff2struct_fsl.mat mean_b0.nii.gz 5tt_fixed.nii.gz flirt_import diff2struct_mrtrix.txt
+    mrtransform 5tt_fixed.mif -linear diff2struct_mrtrix.txt -inverse 5tt_coreg.mif
+    5tt2gmwmi 5tt_coreg.mif gmwmSeed_coreg.mif
+    rm 5tt_fixed.nii.gz 5tt_fixed.mif 5tt_vol0.nii.gz
+
+    ## Register Tian atlas to subject T1 and DWI space
+    mkdir $subject_dwi_dir/t1_temp/
+    mkdir $subject_dwi_dir/tian/
+    mrconvert raw_anat.mif t1_temp/raw_anat.nii.gz
+    cd $subject_dwi_dir/t1_temp
+    fslreorient2std raw_anat.nii.gz raw_anat_std.nii.gz
+    bet raw_anat_std.nii.gz sub-T1_brain.nii.gz
+    flirt -in sub-T1_brain.nii.gz \
+            -ref $mni_ref \
+            -out sub2MNI_lin \
+            -omat sub2MNI_lin.mat
+
+    fnirt --in=raw_anat_std.nii.gz \
+        --aff=sub2MNI_lin.mat \
+        --ref=$mni_ref \
+        --refmask=$mni_ref_mask \
+        --cout=sub2MNI_warp
+
+    invwarp -w sub2MNI_warp \
+            -r raw_anat_std.nii.gz \
+            -o MNI2sub_warp
+
+    for scale in S1 S2 S3 S4; do
+        atlas_file="$tian_atlas_dir/Tian_Subcortex_${scale}_3T_1mm.nii.gz"
+        out_t1="tian_${scale}_T1.nii.gz"
+        cp $out_t1 $subject_dwi_dir/tian
+        
+        # Apply warp: MNI -> T1
+        out_dwi="tian_${scale}_dwi.mif"
+        applywarp -i "$atlas_file" -r "raw_anat_std.nii.gz" -o "$out_t1" -w "MNI2sub_warp" --interp=nn
+
+        # Convert to MRtrix and transform to DWI space
+        mrconvert "$out_t1" "${out_t1%.nii.gz}.mif"
+        mrtransform "${out_t1%.nii.gz}.mif" -linear $subject_dwi_dir/diff2struct_mrtrix.txt -inverse -interp nearest "$out_dwi"
+        mv $out_dwi $subject_dwi_dir/tian
+    done
+        
+    rm -r $subject_dwi_dir/t1_temp
+
+    ## Generate GM–WM interface for subcortical tractography 
+    mrcalc gmwmSeed_coreg.mif 0.5 -gt gmwmSeed_bin.mif
+    mrgrid $subject_dwi_dir/tian/tian_S3_dwi.mif \
+            regrid \
+            -template gmwmSeed_bin.mif \
+            -interp nearest \
+            tian_S3_dwi_resampled.mif
+
+    mrcalc gmwmSeed_bin.mif tian_S3_dwi_resampled.mif -mul subcortical_gmwmi.mif
+
+    ## Create exclusion masks (cortical ribbon exclusion)
+    mrconvert 5tt_coreg.mif -coord 3 0 ribbon_core.mif
+    mrconvert ribbon_core.mif -axes 0,1,2 cortical_ribbon.mif
+    rm ribbon_core.mif
+
+    ## Create exclusion masks (convex hull)
+    mrconvert Tian_subcortical_dwi_resampled.mif Tian_subcortical_dwi_resampled.nii.gz
+    fslmaths Tian_subcortical_dwi_resampled.nii.gz -thr 0.5 -bin Tian_sub_bin.nii.gz
+    fslmaths Tian_sub_bin.nii.gz -kernel sphere 3 -dilM Tian_sub_dil1.nii.gz
+    fslmaths Tian_sub_dil1.nii.gz -kernel sphere 3 -dilM Tian_sub_dil2.nii.gz
+    fslmaths Tian_sub_dil2.nii.gz -kernel sphere 2 -ero Tian_sub_hull.nii.gz
+    mrconvert Tian_sub_hull.nii.gz Tian_sub_hull.mif
+    mrconvert mask.mif mask.nii.gz
+    mrgrid Tian_sub_hull.nii.gz regrid -template mask.mif -interp nearest Tian_sub_hull_resampled.mif
+    mrconvert Tian_sub_hull_resampled.mif Tian_sub_hull_resampled.nii.gz
+    fslmaths mask.nii.gz -sub Tian_sub_hull_resampled.nii.gz -bin hull_exclude.nii.gz
+    mrconvert hull_exclude.nii.gz hull_exclude.mif
+
+    ## create exclusion mask (cortical ribbon + convex hull)
+    mrgrid cortical_ribbon.mif regrid -template mask.mif -interp nearest cortical_ribbon_reg.mif
+    mrgrid hull_exclude.mif regrid -template mask.mif -interp nearest hull_exclude_reg.mif
+
+    ## subcortical tractography
+    voxsize=$(mrinfo wmfod.mif -spacing | awk '{print $1}')
+    step=$(echo "$voxsize * 0.25" | bc -l)
+    tckgen -algorithm iFoD2 \
+            -act 5tt_coreg.mif \
+            -backtrack \
+            -angle 45 \
+            -select 10000000 \
+            -step $step \
+            -exclude cortical_ribbon_reg.mif \
+            -exclude hull_exclude_reg.mif \
+            -seed_image subcortical_gmwmi.mif \
+            wmfod.mif \
+            tracks_subcortical_10M.tck
+
+    tcksift2 -act 5tt_coreg.mif \
+            -out_mu sift_subcortical_mu.txt \
+            -out_coeffs sift_subcortical_coeffs.txt \
+            tracks_subcortical_10M.tck \
+            wmfod.mif \
+            sift_subcortical_1M.txt
+
+    ## global Tractography
+    tckgen -algorithm iFoD2 \
+            -act 5tt_coreg.mif \
+            -backtrack \
+            -angle 45 \
+            -select 10000000 \
+            -seed_gmwmi gmwmSeed_coreg.mif \
+            wmfod.mif \
+            tracks_10M.tck
+
+    tcksift2 -act 5tt_coreg.mif \
+            -out_mu sift_mu.txt \
+            -out_coeffs sift_coeffs.txt \
+            tracks_10M.tck \
+            wmfod.mif \
+            sift_1M.txt
+
+    ## cleaning
+    rm -r t1_temp
+    
+    rm Tian_sub_bin.nii.gz \
+        Tian_sub_dil1.nii.gz \
+        Tian_sub_dil2.nii.gz \
+        Tian_sub_hull.mif \
+        Tian_sub_hull.nii.gz \
+        Tian_sub_hull_resampled.mif \
+        Tian_sub_hull_resampled.nii.gz \
+        Tian_subcortical_dwi.mif \
+        Tian_subcortical_dwi_resampled.nii.gz
+    rm bias.mif cortical_ribbon.mif \
+        dwi_den.mif dwi_gibb.mif noise.mif mask.nii.gz \
+        mean_b0.mif residual.mif ribbon_core.mif
+}
+
+
+
 
 compute_fixel_fixel_connectome () {
     ### set Paths
@@ -128,180 +307,7 @@ run_stats_on_fixels () {
 }
 
 
-## subject level
-create_tractography () {
-    local subject_id=$1
-    echo "Processing subject: $subject_id"
 
-    ### define paths
-    ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
-    subject_fs_dir="$SUBJECTS_DIR/$subject_id"
-    subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
-    raw_anat="$ANTINOMICS_DIR/raws/sMRI_T1/${subject_id}.nii"
-    atlas_dir="/home/ubuntu/volume/Tian_atlas"
-    mni_ref="./data/MNI152NLin6Asym_1mm.nii.gz"
-    mni_ref_mask="./data/MNI152NLin6Asym_1mm_brain.nii.gz"
-
-    cd $subject_dwi_dir
-    
-    ### get the b0 image
-    mrconvert $raw_anat raw_anat.mif
-    dwiextract dwi_unbiased.mif mean_b0.mif -bzero
-    mrconvert mean_b0.mif mean_b0.nii.gz
-
-    ## create 5 tissue type and remove pons from lesion
-    5ttgen hsvs "$subject_fs_dir" 5tt_nocoreg.mif -thalami nuclei -hippocampi aseg
-    for i in 0 1 2 3 4; do
-        mrconvert 5tt_nocoreg.mif -coord 3 $i vol${i}.mif
-    done
-    mrcalc vol4.mif 0 -mul vol4_zero.mif
-    mrcat -axis 3 vol0.mif vol1.mif vol2.mif vol3.mif vol4_zero.mif 5tt_fixed.mif
-    rm vol0.mif vol1.mif vol2.mif vol3.mif vol4.mif vol4_zero.mif
-
-    ## Registration to anatomical image
-    mrconvert 5tt_fixed.mif 5tt_fixed.nii.gz
-    fslroi 5tt_fixed.nii.gz 5tt_vol0.nii.gz 0 1
-    flirt -in mean_b0.nii.gz \
-            -ref 5tt_vol0.nii.gz \
-            -interp nearestneighbour \
-            -dof 6 \
-            -omat diff2struct_fsl.mat
-
-    ## Generate GM–WM interface for global tractography 
-    transformconvert diff2struct_fsl.mat mean_b0.nii.gz 5tt_fixed.nii.gz flirt_import diff2struct_mrtrix.txt
-    mrtransform 5tt_fixed.mif -linear diff2struct_mrtrix.txt -inverse 5tt_coreg.mif
-    5tt2gmwmi 5tt_coreg.mif gmwmSeed_coreg.mif
-
-    ## Register Tian S3 atlas to subject T1 space
-    mkdir t1_temp/
-    mrconvert raw_anat.mif t1_temp/raw_anat.nii.gz
-    cd t1_temp
-    fslreorient2std raw_anat.nii.gz raw_anat_std.nii.gz
-    bet raw_anat_std.nii.gz sub-T1_brain.nii.gz
-    flirt -in sub-T1_brain.nii.gz \
-            -ref $mni_ref \
-            -out sub2MNI_lin \
-            -omat sub2MNI_lin.mat
-
-    fnirt --in=raw_anat_std.nii.gz \
-        --aff=sub2MNI_lin.mat \
-        --ref=$mni_ref \
-        --refmask=$mni_ref_mask \
-        --cout=sub2MNI_warp
-
-    invwarp -w sub2MNI_warp \
-            -r raw_anat_std.nii.gz \
-            -o MNI2sub_warp
-
-    
-    for scale in S1 S2 S3 S4; do
-        atlas_file="$atlas_dir/Tian_Subcortex_${scale}_3T_1mm.nii.gz"
-        out_t1="tian_${scale}_subspace.nii.gz"
-        out_dwi="tian_${scale}_dwi.mif"
-
-        # Apply warp: MNI -> T1
-        applywarp -i "$atlas_file" -r "raw_anat_std.nii.gz" -o "$out_t1" -w "MNI2sub_warp" --interp=nn
-
-        # Convert to MRtrix and transform to DWI space
-        mrconvert "$out_t1" "${out_t1%.nii.gz}.mif"
-        mrtransform "${out_t1%.nii.gz}.mif" -linear ../diff2struct_mrtrix.txt -inverse -interp nearest "$out_dwi"
-    done
-    
-    
-    
-    
-    
-    ## Register Tian S3 atlas to subject DWI space
-    mrconvert tian_subspace.nii.gz ../Tian_subcortical.mif
-    cd $subject_dwi_dir
-    mrtransform Tian_subcortical.mif \
-                -linear diff2struct_mrtrix.txt \
-                -inverse \
-                -interp nearest \
-                Tian_subcortical_dwi.mif
-
-    ## Generate GM–WM interface for subcortical tractography 
-    mrcalc gmwmSeed_coreg.mif 0.5 -gt gmwmSeed_bin.mif
-    mrgrid Tian_subcortical_dwi.mif regrid -template gmwmSeed_bin.mif -interp nearest Tian_subcortical_dwi_resampled.mif
-    mrcalc gmwmSeed_bin.mif Tian_subcortical_dwi_resampled.mif -mul subcortical_gmwmi.mif
-
-    ## Create exclusion masks (cortical ribbon exclusion)
-    mrconvert 5tt_coreg.mif -coord 3 0 ribbon_core.mif
-    mrconvert ribbon_core.mif -axes 0,1,2 cortical_ribbon.mif
-    
-
-    ## Create exclusion masks (convex hull)
-    mrconvert Tian_subcortical_dwi_resampled.mif Tian_subcortical_dwi_resampled.nii.gz
-    fslmaths Tian_subcortical_dwi_resampled.nii.gz -thr 0.5 -bin Tian_sub_bin.nii.gz
-    fslmaths Tian_sub_bin.nii.gz -kernel sphere 3 -dilM Tian_sub_dil1.nii.gz
-    fslmaths Tian_sub_dil1.nii.gz -kernel sphere 3 -dilM Tian_sub_dil2.nii.gz
-    fslmaths Tian_sub_dil2.nii.gz -kernel sphere 2 -ero Tian_sub_hull.nii.gz
-    mrconvert Tian_sub_hull.nii.gz Tian_sub_hull.mif
-    mrconvert mask.mif mask.nii.gz
-    mrgrid Tian_sub_hull.nii.gz regrid -template mask.mif -interp nearest Tian_sub_hull_resampled.mif
-    mrconvert Tian_sub_hull_resampled.mif Tian_sub_hull_resampled.nii.gz
-    fslmaths mask.nii.gz -sub Tian_sub_hull_resampled.nii.gz -bin hull_exclude.nii.gz
-    mrconvert hull_exclude.nii.gz hull_exclude.mif
-
-    ## create exclusion mask (cortical ribbon + convex hull)
-    mrgrid cortical_ribbon.mif regrid -template mask.mif -interp nearest cortical_ribbon_reg.mif
-    mrgrid hull_exclude.mif regrid -template mask.mif -interp nearest hull_exclude_reg.mif
-
-    ## subcortical tractography
-    voxsize=$(mrinfo wmfod.mif -spacing | awk '{print $1}')
-    step=$(echo "$voxsize * 0.25" | bc -l)
-    tckgen -algorithm iFoD2 \
-            -act 5tt_coreg.mif \
-            -backtrack \
-            -angle 45 \
-            -select 10000000 \
-            -step $step \
-            -exclude cortical_ribbon_reg.mif \
-            -exclude hull_exclude_reg.mif \
-            -seed_image subcortical_gmwmi.mif \
-            wmfod.mif \
-            tracks_subcortical_10M.tck
-
-    tcksift2 -act 5tt_coreg.mif \
-            -out_mu sift_subcortical_mu.txt \
-            -out_coeffs sift_subcortical_coeffs.txt \
-            tracks_subcortical_10M.tck \
-            wmfod.mif \
-            sift_subcortical_1M.txt
-
-    ## global Tractography
-    tckgen -algorithm iFoD2 \
-            -act 5tt_coreg.mif \
-            -backtrack \
-            -angle 45 \
-            -select 10000000 \
-            -seed_gmwmi gmwmSeed_coreg.mif \
-            wmfod.mif \
-            tracks_10M.tck
-
-    tcksift2 -act 5tt_coreg.mif \
-            -out_mu sift_mu.txt \
-            -out_coeffs sift_coeffs.txt \
-            tracks_10M.tck \
-            wmfod.mif \
-            sift_1M.txt
-
-    ## cleaning
-    rm -r t1_temp
-    rm 5tt_fixed.nii.gz 5tt_vol0.nii.gz
-    rm Tian_sub_bin.nii.gz \
-        Tian_sub_dil1.nii.gz \
-        Tian_sub_dil2.nii.gz \
-        Tian_sub_hull.mif \
-        Tian_sub_hull.nii.gz \
-        Tian_sub_hull_resampled.mif \
-        Tian_sub_hull_resampled.nii.gz \
-        Tian_subcortical_dwi.mif \
-        Tian_subcortical_dwi_resampled.nii.gz
-    rm bias.mif cortical_ribbon.mif \
-        dwi_den.mif dwi_gibb.mif noise.mif mask.nii.gz \
-        mean_b0.mif residual.mif ribbon_core.mif
-}
 
 
 create_connectome () {

@@ -41,7 +41,7 @@ preprocessDTI () {
     dwifslpreproc dwi_gibb.mif dwi_preproc.mif -pe_dir ap -rpe_none  # roger says its okay
     dwibiascorrect ants dwi_preproc.mif dwi_unbiased.mif -bias bias.mif 
     echo -e "\e[32mPreprocessing is done successfuly!"
-    dwi2mask dwi_unbiased.mif mask.mif
+    dwi2mask dwi_preproc.mif mask.mif
 
     rm noise.mif residual.mif dwi_den.mif dwi_gibb.mif dwi_preproc.mif bias.mif
     mrtrix_cleanup $subject_dwi_dir
@@ -148,8 +148,8 @@ create_tractography () {
     rm ribbon_core.mif
 
     ## Create exclusion masks (convex hull)
-    mrconvert Tian_subcortical_dwi_resampled.mif Tian_subcortical_dwi_resampled.nii.gz
-    fslmaths Tian_subcortical_dwi_resampled.nii.gz -thr 0.5 -bin Tian_sub_bin.nii.gz
+    mrconvert tian_S3_dwi_resampled.mif tian_S3_dwi_resampled.nii.gz
+    fslmaths tian_S3_dwi_resampled.nii.gz -thr 0.5 -bin Tian_sub_bin.nii.gz
     fslmaths Tian_sub_bin.nii.gz -kernel sphere 3 -dilM Tian_sub_dil1.nii.gz
     fslmaths Tian_sub_dil1.nii.gz -kernel sphere 3 -dilM Tian_sub_dil2.nii.gz
     fslmaths Tian_sub_dil2.nii.gz -kernel sphere 2 -ero Tian_sub_hull.nii.gz
@@ -163,6 +163,17 @@ create_tractography () {
     ## create exclusion mask (cortical ribbon + convex hull)
     mrgrid cortical_ribbon.mif regrid -template mask.mif -interp nearest cortical_ribbon_reg.mif
     mrgrid hull_exclude.mif regrid -template mask.mif -interp nearest hull_exclude_reg.mif
+
+    rm Tian_sub_bin.nii.gz \
+        Tian_sub_dil1.nii.gz \
+        Tian_sub_dil2.nii.gz \
+        Tian_sub_hull.mif \
+        Tian_sub_hull.nii.gz \
+        Tian_sub_hull_resampled.mif \
+        Tian_sub_hull_resampled.nii.gz \
+        tian_S3_dwi_resampled.nii.gz \
+        cortical_ribbon.mif \
+        mask.nii.gz
 
     ## subcortical tractography
     voxsize=$(mrinfo wmfod.mif -spacing | awk '{print $1}')
@@ -202,24 +213,92 @@ create_tractography () {
             tracks_10M.tck \
             wmfod.mif \
             sift_1M.txt
-
-    ## cleaning
-    rm -r t1_temp
-    
-    rm Tian_sub_bin.nii.gz \
-        Tian_sub_dil1.nii.gz \
-        Tian_sub_dil2.nii.gz \
-        Tian_sub_hull.mif \
-        Tian_sub_hull.nii.gz \
-        Tian_sub_hull_resampled.mif \
-        Tian_sub_hull_resampled.nii.gz \
-        Tian_subcortical_dwi.mif \
-        Tian_subcortical_dwi_resampled.nii.gz
-    rm bias.mif cortical_ribbon.mif \
-        dwi_den.mif dwi_gibb.mif noise.mif mask.nii.gz \
-        mean_b0.mif residual.mif ribbon_core.mif
 }
 
+######################## CONNECTOME ########################
+
+create_connectome () {
+    local subject_id=$1
+    local atlas=$2 
+    echo "Processing subject: $subject_id"
+
+    ### define paths
+    ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
+    subject_fs_dir="$SUBJECTS_DIR/$subject_id"
+    subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
+    lut_dir="/home/ubuntu/volume/Schaefer_atlas"
+    mrtrix_home="/usr/local/mrtrix3"
+
+
+    # now convert it and bring it to diffusion space
+    cd $subject_dwi_dir
+    transformcalc diff2struct_mrtrix.txt invert struct2diff_mrtrix.txt
+
+    if atlas == "Schaefer":
+
+        for n_roi in 100 200 400 800 1000:
+                mrconvert --datatype uint32 \
+                            $subject_fs_dir/mri/Schaefer2018_${n_roi}_7Networks.mgz \
+                            Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
+
+                mrtransform \
+                            Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
+                            -linear struct2diff_mrtrix.txt \
+                            -interp nearest \
+                            Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif
+
+                mrcalc Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif 0.5 -add -floor Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
+
+                labelconvert \
+                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif \
+                    $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order_LUT.txt \
+                    $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order.txt \
+                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int_converted.mif
+
+                rm Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif \
+                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
+
+                tck2connectome tracks_10M.tck \
+                            Schaefer2018_400_7Networks_DWI_converted.mif \
+                            sch_400_conn.csv \
+                            -tck_weights_in sift_1M.txt \
+                            -out_assignment sch_400_7n_assign.txt \
+                            -symmetric \
+                            -zero_diagonal \
+                            -scale_invnodevol
+
+    if atlas == "Glasser":
+        mrconvert --datatype uint32 \
+                    "${subject_fs_dir}/mri/HCPMMP1.mgz" \
+                    HCPMMP1_T1.mif
+
+        mrtransform HCPMMP1_T1.mif \
+                    -linear struct2diff_mrtrix.txt \
+                    -interp nearest \
+                    HCPMMP1_DWI.mif
+        mrcalc HCPMMP1_DWI.mif 0.5 -add -floor HCPMMP1_DWI_int.mif
+
+        labelconvert \
+                    HCPMMP1_DWI.mif \
+                    $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_original.txt \
+                    $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_ordered.txt \
+                    HCPMMP1_DWI_int_converted.mif
+
+        rm HCPMMP1_DWI.mif HCPMMP1_DWI_int.mif
+
+        tck2connectome tracks_10M.tck \
+                        HCPMMP1_DWI_int_converted.mif \
+                        glasser.csv \
+                        -tck_weights_in sift_1M.txt \
+                        -out_assignment glasser_assign.txt \
+                        -symmetric \
+                        -zero_diagonal \
+                        -scale_invnodevol
+
+    if atlas == "Tian":
+        for scale in 1 2 3 4:
+
+}
 
 
 
@@ -310,90 +389,6 @@ run_stats_on_fixels () {
 
 
 
-create_connectome () {
-    local subject_id=$1
-    local atlas=$2 
-    echo "Processing subject: $subject_id"
-
-    ### define paths
-    ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
-    subject_fs_dir="$SUBJECTS_DIR/$subject_id"
-    subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
-    lut_dir="/home/ubuntu/volume/Schaefer_atlas"
-    mrtrix_home="/usr/local/mrtrix3"
-
-
-    # now convert it and bring it to diffusion space
-    cd $subject_dwi_dir
-    transformcalc diff2struct_mrtrix.txt invert struct2diff_mrtrix.txt
-
-    if atlas == "Schaefer":
-
-        for n_roi in 100 200 400 800 1000:
-                mrconvert --datatype uint32 \
-                            $subject_fs_dir/mri/Schaefer2018_${n_roi}_7Networks.mgz \
-                            Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
-
-                mrtransform \
-                            Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
-                            -linear struct2diff_mrtrix.txt \
-                            -interp nearest \
-                            Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif
-
-                mrcalc Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif 0.5 -add -floor Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
-
-                labelconvert \
-                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif \
-                    $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order_LUT.txt \
-                    $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order.txt \
-                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int_converted.mif
-
-                rm Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif \
-                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
-
-                tck2connectome tracks_10M.tck \
-                            Schaefer2018_400_7Networks_DWI_converted.mif \
-                            sch_400_conn.csv \
-                            -tck_weights_in sift_1M.txt \
-                            -out_assignment sch_400_7n_assign.txt \
-                            -symmetric \
-                            -zero_diagonal \
-                            -scale_invnodevol
-
-    if atlas == "Glasser":
-        mrconvert --datatype uint32 \
-                    "${subject_fs_dir}/mri/HCPMMP1.mgz" \
-                    HCPMMP1_T1.mif
-
-        mrtransform HCPMMP1_T1.mif \
-                    -linear struct2diff_mrtrix.txt \
-                    -interp nearest \
-                    HCPMMP1_DWI.mif
-        mrcalc HCPMMP1_DWI.mif 0.5 -add -floor HCPMMP1_DWI_int.mif
-
-        labelconvert \
-                    HCPMMP1_DWI.mif \
-                    $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_original.txt \
-                    $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_ordered.txt \
-                    HCPMMP1_DWI_int_converted.mif
-
-        rm HCPMMP1_DWI.mif HCPMMP1_DWI_int.mif
-
-        tck2connectome tracks_10M.tck \
-                        HCPMMP1_DWI_int_converted.mif \
-                        glasser.csv \
-                        -tck_weights_in sift_1M.txt \
-                        -out_assignment glasser_assign.txt \
-                        -symmetric \
-                        -zero_diagonal \
-                        -scale_invnodevol
-
-    if atlas == "Tian":
-        for scale in 1 2 3 4:
-
-
-
-}
 
 
 

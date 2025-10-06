@@ -96,22 +96,6 @@ subsegment () {
         echo "$(date): Cerebellum parcellation with $mask_option mask completed for subject $subject_id" >> "$log_file"
     done
 
-    # glasser atlas
-    mri_surf2surf \
-                --srcsubject fsaverage \
-                --trgsubject $subject_id \
-                --hemi lh \
-                --sval-annot $SUBJECTS_DIR/fsaverage/label/lh.HCP-MMP1.annot \
-                --tval      $SUBJECTS_DIR/$subject_id/label/lh.HCP-MMP1.annot
-
-                # Right hemisphere
-                mri_surf2surf \
-                --srcsubject fsaverage \
-                --trgsubject $subject_id \
-                --hemi rh \
-                --sval-annot $SUBJECTS_DIR/fsaverage/label/rh.HCP-MMP1.annot \
-                --tval      $SUBJECTS_DIR/$subject_id/label/rh.HCP-MMP1.annot
-
     # schaefer atlas
     echo -e "\e[32mSchaefer2018 parcellation in individual surface space!"
     for n in 100 200 400 800 1000; do
@@ -123,22 +107,37 @@ subsegment () {
                                 $sch_gcs_dir/${hemi}.Schaefer2018_${n}Parcels_7Networks.gcs \
                                 $SUBJECTS_DIR/$subject_id/label/${hemi}.Schaefer2018_${n}Parcels_7Networks_order.annot
             echo "$(date): Schaefer parcellation with $n labels in $hemi completed for subject $subject_id" >> "$log_file"
-    
-            mri_aparc2aseg --s $subject_id \
-                            --annot Schaefer2018_${n}Parcels_7Networks_order \
-                            --o $SUBJECTS_DIR/$subject_id/mri/Schaefer2018_${n}_7Networks.mgz
-    
         done
+
+        # bring schaefer from surface to volume
+        mri_aparc2aseg --s $subject_id \
+                        --annot Schaefer2018_${n}Parcels_7Networks_order \
+                        --o $SUBJECTS_DIR/$subject_id/mri/Schaefer2018_${n}_7Networks.mgz
+
+        echo "$(date): Schaefer parcellation with $n labels brought to volume space for subject $subject_id" >> "$log_file"
     done
     
-    # bring schaefer from surface to volume
-    cd $subject_fs_dir/mri
-    for n_roi in [400, 800, 1000]:
-        for n_network in [7, 17]:
-            mri_aparc2aseg \
-                            --s $subject_id \
-                            --annot Schaefer2018_${n_roi}Parcels_${n_network}Networks_order \
-                            --o ./mri/Schaefer2018_${n_roi}_${n_network}Networks.mgz
+    ## Glasser atlas
+    mri_surf2surf \
+                    --srcsubject fsaverage \
+                    --trgsubject $subject_id \
+                    --hemi lh \
+                    --sval-annot $SUBJECTS_DIR/fsaverage/label/lh.HCPMMP1.annot \
+                    --tval $SUBJECTS_DIR/$subject_id/label/lh.HCPMMP1.annot
+
+    mri_surf2surf \
+                    --srcsubject fsaverage \
+                    --trgsubject $subject_id \
+                    --hemi rh \
+                    --sval-annot $SUBJECTS_DIR/fsaverage/label/rh.HCPMMP1.annot \
+                    --tval $SUBJECTS_DIR/$subject_id/label/rh.HCPMMP1.annot
+
+    mri_aparc2aseg \
+                --s $subject_id \
+                --annot HCPMMP1 \
+                --o $SUBJECTS_DIR/$subject_id/mri/HCPMMP1.mgz
+    
+
 
 
 }
@@ -152,3 +151,34 @@ for subj_dir in "$SUBJECTS_DIR"/*; do
         fi
     fi
 done
+
+
+
+
+
+
+
+#map the annotation files of the HCP MM1.0 atlas from fsaverage to the subject (first left, then right hemisphere)
+      mri_surf2surf --srcsubject fsaverage --trgsubject $subjectID --hemi lh --sval-annot $SUBJECTS_DIR/fsaverage/label/lh.hcpmmp1.annot --tval $subjectDIR/label/lh.hcpmmp1.annot
+      mri_surf2surf --srcsubject fsaverage --trgsubject $subjectID --hemi rh --sval-annot $SUBJECTS_DIR/fsaverage/label/rh.hcpmmp1.annot --tval $subjectDIR/label/rh.hcpmmp1.annot
+      
+      #Map the HCP MMP 1.0 annotations onto the volumetric image and add (Freesurfer-specific) subcortical segmentation.
+      #Convert the resulting file to .mif format (use datatype uint32 --> liked best by mrtrix)
+      mri_aparc2aseg --old-ribbon --s $subjectID --annot hcpmmp1 --o $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1.mgz"
+      mrconvert --datatype uint32 $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1.mgz" $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1.mif"
+      
+      #Replace the random integers of the hcpmmp1.mif file with integers that start at 1 and increase by 1
+      labelconvert $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1.mif" /home/julia/mrtrix3/share/mrtrix3/labelconvert/hcpmmp1_original.txt /home/julia/mrtrix3/share/mrtrix3/labelconvert/hcpmmp1_ordered.txt $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1_parcels_nocoreg.mif"
+
+      Register the ordered atlas-based volumetric parcellation to diffusion space
+      first calculate transformation
+     
+      flirt -in $derivatives_path"/dwi_oct2020/"$sub"/"$ses"/dwi/"$subjectID"_dir-APPA_meanB0brain.nii.gz" -ref $derivatives_path"/dwi_oct2020/"$sub"/"$ses"/anat/"$subjectID"_acq-mprage_T1wBrain.nii.gz" -dof 6 -omat $derivatives_path"/dwi_oct2020/"$sub"/"$ses"/dwi/"$subjectID"_diff2struct_fsl.mat"
+      transformconvert -force $derivatives_path"/dwi_oct2020/"$sub"/"$ses"/dwi/"$subjectID"_diff2struct_fsl.mat" $derivatives_path"/dwi_oct2020/"$sub"/"$ses"/dwi/"$subjectID"_dir-APPA_meanB0brain.nii.gz" $derivatives_path"/dwi_oct2020/"$sub"/"$ses"/anat/"$subjectID"_acq-mprage_T1wBrain.nii.gz" flirt_import $derivatives_path"/dwi_oct2020/"$sub"/"$ses"/dwi/"$subjectID"_diff2struct_mrtrix.txt"
+      mrtransform -force $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1_parcels_nocoreg.mif" -linear $derivatives_path"/dwi_oct2020/"$sub"/"$ses"/dwi/"$subjectID"_diff2struct_mrtrix.txt" -inverse -datatype uint32 $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1_parcels_coreg.mif"
+      mrstats $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1_parcels_nocoreg.mif"
+      mrstats $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1_parcels_coreg.mif"
+
+      #connectomics
+      connectome_filename=$derivatives_path"/dwi/"$sub"/"$ses"/dwi/"$subjectID"_connectome_Glasser.csv"
+      tck2connectome $derivatives_path"/dwi/"$sub"/"$ses"/dwi/"$subjectID"_iFOD2.tck" $derivatives_path"/dwi/"$sub"/"$ses"/anat/"$subjectID"_hcpmmp1_parcels_coreg.mif" $connectome_filename --assignment_radial_search 3.2 -zero_diagonal --force

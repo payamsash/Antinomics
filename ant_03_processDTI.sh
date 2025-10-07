@@ -59,8 +59,8 @@ create_tractography () {
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     raw_anat="$ANTINOMICS_DIR/raws/sMRI_T1/${subject_id}.nii"
     tian_atlas_dir="/home/ubuntu/volume/tools/Tian_atlas"
-    mni_ref="/home/ubuntu/volume/tools/MNI152NLin6Asym_1mm.nii.gz"
-    mni_ref_mask="/home/ubuntu/volume/tools/MNI152NLin6Asym_1mm_brain.nii.gz"
+    mni_ref="/home/ubuntu/volume/MNI_HCP/MNI152NLin6Asym_1mm.nii.gz"
+    mni_ref_mask="/home/ubuntu/volume/MNI_HCP/MNI152NLin6Asym_1mm_brain.nii.gz"
 
     cd $subject_dwi_dir
     
@@ -117,17 +117,16 @@ create_tractography () {
 
     for scale in S1 S2 S3 S4; do
         atlas_file="$tian_atlas_dir/Tian_Subcortex_${scale}_3T_1mm.nii.gz"
-        out_t1="tian_${scale}_T1.nii.gz"
-        cp $out_t1 $subject_dwi_dir/tian
+        out_t1=$subject_dwi_dir/tian/tian_${scale}_T1.nii.gz
         
         # Apply warp: MNI -> T1
-        out_dwi="tian_${scale}_dwi.mif"
+        out_dwi=$subject_dwi_dir/tian/tian_${scale}_dwi.mif 
         applywarp -i "$atlas_file" -r "raw_anat_std.nii.gz" -o "$out_t1" -w "MNI2sub_warp" --interp=nn
 
         # Convert to MRtrix and transform to DWI space
         mrconvert "$out_t1" "${out_t1%.nii.gz}.mif"
         mrtransform "${out_t1%.nii.gz}.mif" -linear $subject_dwi_dir/diff2struct_mrtrix.txt -inverse -interp nearest "$out_dwi"
-        mv $out_dwi $subject_dwi_dir/tian
+        
     done
         
     rm -r $subject_dwi_dir/t1_temp
@@ -219,7 +218,6 @@ create_tractography () {
 
 create_connectome () {
     local subject_id=$1
-    local atlas=$2 
     echo "Processing subject: $subject_id"
 
     ### define paths
@@ -227,75 +225,76 @@ create_connectome () {
     subject_fs_dir="$SUBJECTS_DIR/$subject_id"
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     lut_dir="/home/ubuntu/volume/Schaefer_atlas"
+    conn_dir=$subject_dwi_dir/conn
     mrtrix_home="/usr/local/mrtrix3"
-
-
+    mkdir -p $conn_dir
+    
     # now convert it and bring it to diffusion space
     cd $subject_dwi_dir
     transformcalc diff2struct_mrtrix.txt invert struct2diff_mrtrix.txt
 
-    if atlas == "Schaefer":
+    #### Schaefer atlas ###
+    mkdir $subject_dwi_dir/atlases
+    cd $subject_dwi_dir/atlases
+    n_network=7
+    for n_roi in 100 200 400 800 1000:
+        mrconvert --datatype uint32 \
+                    $subject_fs_dir/mri/Schaefer2018_${n_roi}_7Networks.mgz \
+                    Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
 
-        for n_roi in 100 200 400 800 1000:
-                mrconvert --datatype uint32 \
-                            $subject_fs_dir/mri/Schaefer2018_${n_roi}_7Networks.mgz \
-                            Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
+        mrtransform Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
+                    -linear struct2diff_mrtrix.txt \
+                    -interp nearest \
+                    Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif
 
-                mrtransform \
-                            Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
-                            -linear struct2diff_mrtrix.txt \
-                            -interp nearest \
-                            Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif
+        mrcalc Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif 0.5 -add -floor Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
 
-                mrcalc Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif 0.5 -add -floor Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
-
-                labelconvert \
-                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif \
+        labelconvert Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif \
                     $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order_LUT.txt \
                     $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order.txt \
                     Schaefer2018_${n_roi}_${n_network}Networks_DWI_int_converted.mif
 
-                rm Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif \
-                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
+        rm  Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
+            Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif \
+            Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
 
-                tck2connectome tracks_10M.tck \
-                            Schaefer2018_400_7Networks_DWI_converted.mif \
-                            sch_400_conn.csv \
-                            -tck_weights_in sift_1M.txt \
-                            -out_assignment sch_400_7n_assign.txt \
-                            -symmetric \
-                            -zero_diagonal \
-                            -scale_invnodevol
+        tck2connectome $subject_dwi_dir/tracks_10M.tck \
+                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_converted.mif \
+                    $conn_dir/sch_${n_roi}_conn.csv \
+                    -tck_weights_in $conn_dir/sch_${n_roi}_sift.txt \
+                    -out_assignment $conn_dir/sch_${n_roi}_assign.txt \
+                    -symmetric \
+                    -zero_diagonal \
+                    -scale_invnodevol
+    done
 
-    if atlas == "Glasser":
-        mrconvert --datatype uint32 \
-                    "${subject_fs_dir}/mri/HCPMMP1.mgz" \
-                    HCPMMP1_T1.mif
+    #### Glasser atlas ###
+    mrconvert --datatype uint32 \
+                $subject_fs_dir/mri/HCPMMP1.mgz \
+                HCPMMP1_T1.mif
 
-        mrtransform HCPMMP1_T1.mif \
-                    -linear struct2diff_mrtrix.txt \
-                    -interp nearest \
-                    HCPMMP1_DWI.mif
-        mrcalc HCPMMP1_DWI.mif 0.5 -add -floor HCPMMP1_DWI_int.mif
+    mrtransform HCPMMP1_T1.mif \
+                -linear struct2diff_mrtrix.txt \
+                -interp nearest \
+                HCPMMP1_DWI.mif
+    # mrcalc HCPMMP1_DWI.mif 0.5 -add -floor HCPMMP1_DWI_int.mif
+    labelconvert HCPMMP1_DWI.mif \
+                $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_original.txt \
+                $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_ordered.txt \
+                HCPMMP1_DWI_int_converted.mif
 
-        labelconvert \
-                    HCPMMP1_DWI.mif \
-                    $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_original.txt \
-                    $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_ordered.txt \
-                    HCPMMP1_DWI_int_converted.mif
+    rm HCPMMP1_DWI.mif HCPMMP1_T1.mif
 
-        rm HCPMMP1_DWI.mif HCPMMP1_DWI_int.mif
+    tck2connectome $subject_dwi_dir/tracks_10M.tck \
+                    HCPMMP1_DWI_int_converted.mif \
+                    $conn_dir/glasser.csv \
+                    -tck_weights_in $conn_dir/glasser_sift.txt \
+                    -out_assignment $conn_dir/glasser_assign.txt \
+                    -symmetric \
+                    -zero_diagonal \
+                    -scale_invnodevol
 
-        tck2connectome tracks_10M.tck \
-                        HCPMMP1_DWI_int_converted.mif \
-                        glasser.csv \
-                        -tck_weights_in sift_1M.txt \
-                        -out_assignment glasser_assign.txt \
-                        -symmetric \
-                        -zero_diagonal \
-                        -scale_invnodevol
-
-    if atlas == "Tian":
+    #### Tian atlas ###
         for scale in 1 2 3 4:
 
 }

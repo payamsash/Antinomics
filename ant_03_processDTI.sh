@@ -100,6 +100,8 @@ create_tractography () {
     cd $subject_dwi_dir/t1_temp
     fslreorient2std raw_anat.nii.gz raw_anat_std.nii.gz
     bet raw_anat_std.nii.gz sub-T1_brain.nii.gz
+    
+    ## this part is wrong ... maybe switch to ants
     flirt -in sub-T1_brain.nii.gz \
             -ref $mni_ref \
             -out sub2MNI_lin \
@@ -110,6 +112,8 @@ create_tractography () {
         --ref=$mni_ref \
         --refmask=$mni_ref_mask \
         --cout=sub2MNI_warp
+
+    ##
 
     invwarp -w sub2MNI_warp \
             -r raw_anat_std.nii.gz \
@@ -234,34 +238,32 @@ create_connectome () {
     transformcalc diff2struct_mrtrix.txt invert struct2diff_mrtrix.txt
 
     #### Schaefer atlas ###
-    mkdir $subject_dwi_dir/atlases
+    mkdir -p $subject_dwi_dir/atlases
     cd $subject_dwi_dir/atlases
     n_network=7
-    for n_roi in 100 200 400 800 1000:
+    for n_roi in 400 800 1000; do
         mrconvert --datatype uint32 \
                     $subject_fs_dir/mri/Schaefer2018_${n_roi}_7Networks.mgz \
                     Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
 
         mrtransform Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
-                    -linear struct2diff_mrtrix.txt \
+                    -linear $subject_dwi_dir/struct2diff_mrtrix.txt \
                     -interp nearest \
                     Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif
-
         mrcalc Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif 0.5 -add -floor Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
-
         labelconvert Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif \
                     $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order_LUT.txt \
                     $lut_dir/Schaefer2018_${n_roi}Parcels_${n_network}Networks_order.txt \
-                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_int_converted.mif
-
+                    Schaefer2018_${n_roi}_${n_network}Networks_DWI_converted.mif
+        
         rm  Schaefer2018_${n_roi}_${n_network}Networks_T1.mif \
             Schaefer2018_${n_roi}_${n_network}Networks_DWI.mif \
             Schaefer2018_${n_roi}_${n_network}Networks_DWI_int.mif
-
+        
         tck2connectome $subject_dwi_dir/tracks_10M.tck \
                     Schaefer2018_${n_roi}_${n_network}Networks_DWI_converted.mif \
                     $conn_dir/sch_${n_roi}_conn.csv \
-                    -tck_weights_in $conn_dir/sch_${n_roi}_sift.txt \
+                    -tck_weights_in $subject_dwi_dir/sift_1M.txt \
                     -out_assignment $conn_dir/sch_${n_roi}_assign.txt \
                     -symmetric \
                     -zero_diagonal \
@@ -272,34 +274,39 @@ create_connectome () {
     mrconvert --datatype uint32 \
                 $subject_fs_dir/mri/HCPMMP1.mgz \
                 HCPMMP1_T1.mif
-
     mrtransform HCPMMP1_T1.mif \
-                -linear struct2diff_mrtrix.txt \
+                -linear $subject_dwi_dir/struct2diff_mrtrix.txt \
                 -interp nearest \
                 HCPMMP1_DWI.mif
     # mrcalc HCPMMP1_DWI.mif 0.5 -add -floor HCPMMP1_DWI_int.mif
     labelconvert HCPMMP1_DWI.mif \
                 $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_original.txt \
                 $mrtrix_home/share/mrtrix3/labelconvert/hcpmmp1_ordered.txt \
-                HCPMMP1_DWI_int_converted.mif
-
+                HCPMMP1_DWI_converted.mif
     rm HCPMMP1_DWI.mif HCPMMP1_T1.mif
-
     tck2connectome $subject_dwi_dir/tracks_10M.tck \
-                    HCPMMP1_DWI_int_converted.mif \
-                    $conn_dir/glasser.csv \
-                    -tck_weights_in $conn_dir/glasser_sift.txt \
+                    HCPMMP1_DWI_converted.mif \
+                    $conn_dir/glasser_conn.csv \
+                    -tck_weights_in $subject_dwi_dir/sift_1M.txt \
                     -out_assignment $conn_dir/glasser_assign.txt \
                     -symmetric \
                     -zero_diagonal \
                     -scale_invnodevol
 
     #### Tian atlas ###
-        for scale in 1 2 3 4:
-
+    for scale in S1 S2 S3 S4; do
+        tck2connectome $subject_dwi_dir/tracks_subcortical_10M.tck \
+                        $subject_dwi_dir/tian/tian_${scale}_dwi.mif \
+                        $conn_dir/tian_${scale}_conn.csv \
+                        -tck_weights_in $subject_dwi_dir/sift_subcortical_1M.txt \
+                        -out_assignment $conn_dir/tian_${scale}_assign.txt \
+                        -symmetric \
+                        -zero_diagonal \
+                        -scale_invnodevol
+    done
 }
 
-
+######################## FIXEL-FIXEL ########################
 
 compute_fixel_fixel_connectome () {
     ### set Paths
@@ -384,24 +391,24 @@ run_stats_on_fixels () {
     > fixelcfestats_all.out 2>&1 &
 }
 
+######################## TOOLS ########################
 
+create_exempler_files () {
+    local subject_id=$1
+    echo "Processing subject: $subject_id"
+    ANTINOMICS_DIR="/home/ubuntu/volume/Antinomics"
+    subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
 
+    connectome2tck tracks_10M.tck \
+                    sch_400_7n_assign.txt \
+                    sch_${n}Parcels_7Networks_edge_exemplar.tck \
+                    -files single \
+                    -exemplars Schaefer2018_400_7Networks_DWI_converted.mif
 
+    label2mesh Schaefer2018_400_7Networks_DWI_converted.mif mesh_400.obj
+    meshfilter mesh_400.obj smooth mesh_400_smooth.obj
+}
 
-
-
-
-            
-            ## only for 1 subject
-            connectome2tck tracks_10M.tck \
-                            sch_400_7n_assign.txt \
-                            sch_${n}Parcels_7Networks_edge_exemplar.tck \
-                            -files single \
-                            -exemplars Schaefer2018_400_7Networks_DWI_converted.mif
-
-
-            label2mesh Schaefer2018_400_7Networks_DWI_converted.mif mesh_400.obj
-            meshfilter mesh_400.obj smooth mesh_400_smooth.obj
 
 ## extract some metrics
     fod2fixel wmfod_norm.mif fixel_dir/ -afd fd.mif -mask mask.mif
@@ -416,52 +423,27 @@ for t1_file in /home/ubuntu/volume/Antinomics/raws/sMRI_T1/*.nii; do
 done
 
 
+antsRegistrationSyNQuick.sh \
+  -d 3 \
+  -f /Users/payamsadeghishabestari/Antinomics/data/tpl-MNI152NLin6Asym_res-01_desc-brain_T1w.nii.gz \
+  -m sub-T1_brain.nii.gz \
+  -o sub2MNI_ \
+  -x /Users/payamsadeghishabestari/Antinomics/data/MNI152NLin6Asym_1mm_brain_mask.nii.gz
 
-'''
-Goal:
-We want to reconstruct white matter tracts that connect subcortical nuclei (thalamus, basal ganglia, hippocampus, amygdala, etc.) while avoiding cortical regions or other unwanted areas.
-1️⃣ Start with an atlas of subcortical regions
-The Tian atlas provides a detailed map of subcortical nuclei in standard (MNI) space.
-These nuclei are the “regions of interest” we want to seed for tractography.
-We choose a scale (e.g., S3) that balances anatomical detail and seed robustness.
-2️⃣ Bring the atlas into the subject’s native anatomical space
-Every subject’s brain is slightly different in size, shape, and orientation.
-We warp the atlas to the subject’s T1-weighted MRI so that the labels correctly match their subcortical anatomy.
-Nonlinear registration is ideal here because it allows small nuclei to line up accurately with the subject’s brain.
-3️⃣ Bring the labels into diffusion space
-Tractography is performed on diffusion-weighted images (DWI).
-We need to map the subcortical labels from T1 space into DWI space, so the seeds are in the correct location relative to the diffusion data.
-4️⃣ Restrict seeds to the GM–WM interface
-Streamlines are generated from the interface between gray matter and white matter, not deep inside gray matter or in CSF.
-By multiplying the subcortical labels with a GM–WM interface mask, we ensure that seeds start from just inside the white matter connected to the subcortical nuclei.
-5️⃣ Optional exclusion masks
-Cortical ribbon mask: prevents streamlines from entering cortex.
-Convex hull mask around subcortical structures: prevents streamlines from leaving the subcortical area too far.
-These help constrain the tractogram to subcortical–subcortical connections, avoiding contamination from cortical or CSF regions.
+################
+antsApplyTransforms -d 3 \
+  -r sub-T1_brain.nii.gz \
+  -o sub2MNI_CompositeInvWarp.nii.gz \
+  -t "[sub2MNI_0GenericAffine.mat,1]" \
+  -t sub2MNI_1InverseWarp.nii.gz \
+  --compose
 
-When you seed from the GM–WM interface near subcortical regions (e.g. thalamus, striatum, hippocampus), streamlines can sometimes:
-Leak into the cortical ribbon (i.e. grey matter sheet on the surface).
-Shoot into CSF or outside the brain if the mask has imperfections.
-Create spurious loops across sulci/gyri because the seeds are near boundaries.
-👉 To prevent this, you add exclusion masks: regions where streamlines are not allowed to go.
-If a streamline enters an exclusion mask, it gets terminated.
+for scale in S1 S2 S3 S4; do
+  antsApplyTransforms -d 3 \
+    -i /Users/payamsadeghishabestari/Antinomics/data/Tian2020MSA/3T/Subcortex-Only/Tian_Subcortex_${scale}_3T_1mm.nii.gz \
+    -r sub-T1_brain.nii.gz \
+    -o Tian_${scale}_inSubj.nii.gz \
+    -t sub2MNI_CompositeInvWarp.nii.gz \
+    -n NearestNeighbor
+done
 
-
-
-6️⃣ Generate the tractogram
-Using the subcortical GM–WM seeds, we run probabilistic tractography with the ACT framework (anatomically constrained tractography).
-ACT ensures that streamlines follow white matter pathways, terminate in GM, and avoid non-brain tissues.
-The result is a tractogram connecting subcortical nuclei, which can be used for connectivity analyses.
-'''
-
-## remove 17 network
-## add 100, 200 schaefer
-## make proper foldering
-## run aparc2aseg for all and move it to subsegment
-## run connectome and proper foldering for it
-## tian atlas
-## glasser atlas
-## connectome2tck plots
-
-## mrview Schaefer2018_400_7Networks_DWI_converted.mif -connectome.init Schaefer2018_400_7Networks_DWI_converted.mif -connectome.load sch_400_conn.csv
-## So for instance: You could load a structural connectome file as your connectome matrix and show only those edges where the connection density is above a certain threshold, but then set the colour of each edge based on a different matrix file that contains functional connectivity values.

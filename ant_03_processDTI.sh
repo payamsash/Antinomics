@@ -58,9 +58,8 @@ create_tractography () {
     subject_fs_dir="$SUBJECTS_DIR/$subject_id"
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
     raw_anat="$ANTINOMICS_DIR/raws/sMRI_T1/${subject_id}.nii"
-    tian_atlas_dir="/home/ubuntu/volume/tools/Tian_atlas"
-    mni_ref="/home/ubuntu/volume/MNI_HCP/MNI152NLin6Asym_1mm.nii.gz"
-    mni_ref_mask="/home/ubuntu/volume/MNI_HCP/MNI152NLin6Asym_1mm_brain.nii.gz"
+    tian_atlas_dir="/home/ubuntu/volume/Tian_atlas"
+    mni_hcp_dir="/home/ubuntu/volume/MNI_HCP"
 
     cd $subject_dwi_dir
     
@@ -96,43 +95,31 @@ create_tractography () {
     ## Register Tian atlas to subject T1 and DWI space
     mkdir $subject_dwi_dir/t1_temp/
     mkdir $subject_dwi_dir/tian/
-    mrconvert raw_anat.mif t1_temp/raw_anat.nii.gz
+    mrconvert raw_anat.mif $subject_dwi_dir/t1_temp/raw_anat.nii.gz
     cd $subject_dwi_dir/t1_temp
     fslreorient2std raw_anat.nii.gz raw_anat_std.nii.gz
     bet raw_anat_std.nii.gz sub-T1_brain.nii.gz
     
-    ## this part is wrong ... maybe switch to ants
-    flirt -in sub-T1_brain.nii.gz \
-            -ref $mni_ref \
-            -out sub2MNI_lin \
-            -omat sub2MNI_lin.mat
-
-    fnirt --in=raw_anat_std.nii.gz \
-        --aff=sub2MNI_lin.mat \
-        --ref=$mni_ref \
-        --refmask=$mni_ref_mask \
-        --cout=sub2MNI_warp
-
-    ##
-
-    invwarp -w sub2MNI_warp \
-            -r raw_anat_std.nii.gz \
-            -o MNI2sub_warp
+    antsRegistrationSyNQuick.sh -d 3 \
+                                -f $mni_hcp_dir/tpl-MNI152NLin6Asym_res-01_desc-brain_T1w.nii.gz \
+                                -m sub-T1_brain.nii.gz \
+                                -o sub2MNI_ \
+                                -x $mni_hcp_dir/tpl-MNI152NLin6Asym_res-01_desc-brain_mask.nii.gz
 
     for scale in S1 S2 S3 S4; do
-        atlas_file="$tian_atlas_dir/Tian_Subcortex_${scale}_3T_1mm.nii.gz"
-        out_t1=$subject_dwi_dir/tian/tian_${scale}_T1.nii.gz
-        
-        # Apply warp: MNI -> T1
-        out_dwi=$subject_dwi_dir/tian/tian_${scale}_dwi.mif 
-        applywarp -i "$atlas_file" -r "raw_anat_std.nii.gz" -o "$out_t1" -w "MNI2sub_warp" --interp=nn
-
-        # Convert to MRtrix and transform to DWI space
-        mrconvert "$out_t1" "${out_t1%.nii.gz}.mif"
-        mrtransform "${out_t1%.nii.gz}.mif" -linear $subject_dwi_dir/diff2struct_mrtrix.txt -inverse -interp nearest "$out_dwi"
-        
+        antsApplyTransforms -d 3 \
+                            -i $tian_atlas_dir/Tian_Subcortex_${scale}_3T_1mm.nii.gz \
+                            -r sub-T1_brain.nii.gz \
+                            -o $subject_dwi_dir/tian/tian_${scale}_T1.nii.gz \
+                            -t "[sub2MNI_0GenericAffine.mat,1]" \
+                            -t sub2MNI_1InverseWarp.nii.gz \
+                            -n NearestNeighbor
+    
+        mrconvert $subject_dwi_dir/tian/tian_${scale}_T1.nii.gz tian_${scale}_T1.mif
+        mrtransform tian_${scale}_T1.mif -linear $subject_dwi_dir/diff2struct_mrtrix.txt -inverse -interp nearest $subject_dwi_dir/tian/tian_${scale}_dwi.mif
     done
-        
+    
+    cd $subject_dwi_dir
     rm -r $subject_dwi_dir/t1_temp
 
     ## Generate GM–WM interface for subcortical tractography 
@@ -148,7 +135,6 @@ create_tractography () {
     ## Create exclusion masks (cortical ribbon exclusion)
     mrconvert 5tt_coreg.mif -coord 3 0 ribbon_core.mif
     mrconvert ribbon_core.mif -axes 0,1,2 cortical_ribbon.mif
-    rm ribbon_core.mif
 
     ## Create exclusion masks (convex hull)
     mrconvert tian_S3_dwi_resampled.mif tian_S3_dwi_resampled.nii.gz
@@ -167,7 +153,10 @@ create_tractography () {
     mrgrid cortical_ribbon.mif regrid -template mask.mif -interp nearest cortical_ribbon_reg.mif
     mrgrid hull_exclude.mif regrid -template mask.mif -interp nearest hull_exclude_reg.mif
 
-    rm Tian_sub_bin.nii.gz \
+    rm \
+        gmwmSeed_bin.mif \
+        ribbon_core.mif \
+        Tian_sub_bin.nii.gz \
         Tian_sub_dil1.nii.gz \
         Tian_sub_dil2.nii.gz \
         Tian_sub_hull.mif \
@@ -176,6 +165,7 @@ create_tractography () {
         Tian_sub_hull_resampled.nii.gz \
         tian_S3_dwi_resampled.nii.gz \
         cortical_ribbon.mif \
+        hull_exclude.nii.gz \
         mask.nii.gz
 
     ## subcortical tractography
@@ -425,10 +415,10 @@ done
 
 antsRegistrationSyNQuick.sh \
   -d 3 \
-  -f /Users/payamsadeghishabestari/Antinomics/data/tpl-MNI152NLin6Asym_res-01_desc-brain_T1w.nii.gz \
+  -f tpl-MNI152NLin6Asym_res-01_desc-brain_T1w.nii.gz \
   -m sub-T1_brain.nii.gz \
   -o sub2MNI_ \
-  -x /Users/payamsadeghishabestari/Antinomics/data/MNI152NLin6Asym_1mm_brain_mask.nii.gz
+  -x tpl-MNI152NLin6Asym_res-01_desc-brain_mask.nii.gz
 
 ################
 antsApplyTransforms -d 3 \

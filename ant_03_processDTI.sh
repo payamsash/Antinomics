@@ -390,13 +390,13 @@ create_exempler_files () {
     subject_dwi_dir="$ANTINOMICS_DIR/subjects_mrtrix_dir/$subject_id"
 
     connectome2tck tracks_10M.tck \
-                    sch_400_7n_assign.txt \
-                    sch_${n}Parcels_7Networks_edge_exemplar.tck \
+                    ./conn/glasser_assign.txt \
+                    glasser_edge_exemplar.tck \
                     -files single \
-                    -exemplars Schaefer2018_400_7Networks_DWI_converted.mif
+                    -exemplars HCPMMP1_DWI_converted.mif
 
-    label2mesh Schaefer2018_400_7Networks_DWI_converted.mif mesh_400.obj
-    meshfilter mesh_400.obj smooth mesh_400_smooth.obj
+    label2mesh HCPMMP1_DWI_converted.mif glasser_mesh.obj
+    meshfilter glasser_mesh.obj smooth glasser_mesh_smooth.obj
 }
 
 
@@ -411,29 +411,3 @@ for t1_file in /home/ubuntu/volume/Antinomics/raws/sMRI_T1/*.nii; do
         create_tractography "$subject_id"   
     fi
 done
-
-
-antsRegistrationSyNQuick.sh \
-  -d 3 \
-  -f tpl-MNI152NLin6Asym_res-01_desc-brain_T1w.nii.gz \
-  -m sub-T1_brain.nii.gz \
-  -o sub2MNI_ \
-  -x tpl-MNI152NLin6Asym_res-01_desc-brain_mask.nii.gz
-
-################
-antsApplyTransforms -d 3 \
-  -r sub-T1_brain.nii.gz \
-  -o sub2MNI_CompositeInvWarp.nii.gz \
-  -t "[sub2MNI_0GenericAffine.mat,1]" \
-  -t sub2MNI_1InverseWarp.nii.gz \
-  --compose
-
-for scale in S1 S2 S3 S4; do
-  antsApplyTransforms -d 3 \
-    -i /Users/payamsadeghishabestari/Antinomics/data/Tian2020MSA/3T/Subcortex-Only/Tian_Subcortex_${scale}_3T_1mm.nii.gz \
-    -r sub-T1_brain.nii.gz \
-    -o Tian_${scale}_inSubj.nii.gz \
-    -t sub2MNI_CompositeInvWarp.nii.gz \
-    -n NearestNeighbor
-done
-

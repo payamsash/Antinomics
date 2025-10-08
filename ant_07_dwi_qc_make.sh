@@ -143,4 +143,39 @@ cat > report/qc_report.html <<EOF
 </html>
 EOF
 
-echo ">>> QC report ready at: $subject_mrtrix_dir/report/qc_report.html"
+echo ">>> QC report ready at: $subject_mrtrix_dir/report/qc_report.html"        
+
+'''
+## screenshot tracks
+mrview raw_anat_dwi.mif \
+        -mode 2 \
+        -size 1000,800 \
+        -noannotations \
+        -comments false \
+        -voxelinfo false \
+        -colourbar false \
+        -tractography.geometry points \
+        -tractography.load tracks_subcortical_10M.tck \
+        -capture.prefix example_subcortical \
+        -capture.grab -exit
+
+
+scale=S3
+tck2connectome tracks_subcortical_10M.tck \
+                ../tian/tian_${scale}_dwi.mif \
+                        ./conn/tian_${scale}_conn.csv \
+                        -tck_weights_in sift_subcortical_1M.txt \
+                        -out_assignment ./conn/tian_${scale}_assign.txt \
+                        -symmetric \
+                        -zero_diagonal \
+                        -scale_invnodevol
+'''
+
+connectome2tck tracks_subcortical_10M.tck \
+                    ./conn/tian_S3_assign.txt \
+                    tian_S3_edge_exemplar.tck \
+                    -files single \
+                    -exemplars ../tian/tian_S3_dwi_int.mif
+
+label2mesh ../tian/tian_S3_dwi_int.mif tian_S3_mesh.obj
+meshfilter tian_S3_mesh.obj smooth tian_S3_mesh_smooth.obj

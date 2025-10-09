@@ -31,7 +31,7 @@ The processing scripts are numbered to indicate their execution order. Each scri
 ---
 
 <p align="center">
-  <img src="images/picture_1.svg" alt="Pipeline illustration" width="800">
+  <img src="images/Picture_1.svg" alt="Pipeline illustration" width="800">
 </p>
 
 *For questions or collaboration inquiries, please contact payam.*

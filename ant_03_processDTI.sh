@@ -231,7 +231,7 @@ create_connectome () {
     mkdir -p $subject_dwi_dir/atlases
     cd $subject_dwi_dir/atlases
     n_network=7
-    for n_roi in 400 800 1000; do
+    for n_roi in 100 200 400 800 1000; do
         mrconvert --datatype uint32 \
                     $subject_fs_dir/mri/Schaefer2018_${n_roi}_7Networks.mgz \
                     Schaefer2018_${n_roi}_${n_network}Networks_T1.mif
@@ -256,8 +256,7 @@ create_connectome () {
                     -tck_weights_in $subject_dwi_dir/sift_1M.txt \
                     -out_assignment $conn_dir/sch_${n_roi}_assign.txt \
                     -symmetric \
-                    -zero_diagonal \
-                    -scale_invnodevol
+                    -zero_diagonal
     done
 
     #### Glasser atlas ###
@@ -280,8 +279,7 @@ create_connectome () {
                     -tck_weights_in $subject_dwi_dir/sift_1M.txt \
                     -out_assignment $conn_dir/glasser_assign.txt \
                     -symmetric \
-                    -zero_diagonal \
-                    -scale_invnodevol
+                    -zero_diagonal
 
     #### Tian atlas ###
     for scale in S1 S2 S3 S4; do
@@ -291,8 +289,7 @@ create_connectome () {
                         -tck_weights_in $subject_dwi_dir/sift_subcortical_1M.txt \
                         -out_assignment $conn_dir/tian_${scale}_assign.txt \
                         -symmetric \
-                        -zero_diagonal \
-                        -scale_invnodevol
+                        -zero_diagonal
     done
 }
 

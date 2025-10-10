@@ -32,6 +32,34 @@ create_tractography () {
 
     cd $subject_dwi_dir
 
+    ### get the b0 image
+    mrconvert $raw_anat raw_anat.mif
+    dwiextract dwi_unbiased.mif mean_b0.mif -bzero
+    mrconvert mean_b0.mif mean_b0.nii.gz
+
+    ## create 5 tissue type and remove pons from lesion
+    5ttgen hsvs "$subject_fs_dir" 5tt_nocoreg.mif -thalami nuclei -hippocampi aseg
+    for i in 0 1 2 3 4; do
+        mrconvert 5tt_nocoreg.mif -coord 3 $i vol${i}.mif
+    done
+    mrcalc vol4.mif 0 -mul vol4_zero.mif
+    mrcat -axis 3 vol0.mif vol1.mif vol2.mif vol3.mif vol4_zero.mif 5tt_fixed.mif
+    rm vol0.mif vol1.mif vol2.mif vol3.mif vol4.mif vol4_zero.mif
+
+    ## Registration to anatomical image
+    mrconvert 5tt_fixed.mif 5tt_fixed.nii.gz
+    fslroi 5tt_fixed.nii.gz 5tt_vol0.nii.gz 0 1
+    flirt -in mean_b0.nii.gz \
+            -ref 5tt_vol0.nii.gz \
+            -interp nearestneighbour \
+            -dof 6 \
+            -omat diff2struct_fsl.mat
+
+    ## Generate GM–WM interface for global tractography 
+    transformconvert diff2struct_fsl.mat mean_b0.nii.gz 5tt_fixed.nii.gz flirt_import diff2struct_mrtrix.txt
+    mrtransform 5tt_fixed.mif -linear diff2struct_mrtrix.txt -inverse 5tt_coreg.mif
+    5tt2gmwmi 5tt_coreg.mif gmwmSeed_coreg.mif
+    rm 5tt_fixed.nii.gz 5tt_fixed.mif 5tt_vol0.nii.gz
 
     rm -f 5tt_fixed.mif gmwmSeed_bin.mif subcortical_gmwmi.mif \
         Tian_subcortical.mif Tian_subcortical_dwi_resampled.mif hull_exclude.mif hull_exclude.nii.gz \
@@ -209,7 +237,5 @@ create_tractography () {
 
 for t1_file in /home/ubuntu/volume/Antinomics/raws/sMRI_T1/*.nii; do
     subject_id=$(basename "$t1_file" .nii)
-    if [ "$subject_id" = "bkai" ]; then
-        create_tractography "$subject_id"   
-    fi
+    create_tractography "$subject_id"
 done

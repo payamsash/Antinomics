@@ -164,6 +164,23 @@ create_tractography () {
             wmfod.mif \
             sift_subcortical_1M.txt
 
+    ## global Tractography
+    tckgen -algorithm iFoD2 \
+            -act 5tt_coreg.mif \
+            -backtrack \
+            -angle 45 \
+            -select 10000000 \
+            -seed_gmwmi gmwmSeed_coreg.mif \
+            wmfod.mif \
+            tracks_10M.tck
+
+    tcksift2 -act 5tt_coreg.mif \
+            -out_mu sift_mu.txt \
+            -out_coeffs sift_coeffs.txt \
+            tracks_10M.tck \
+            wmfod.mif \
+            sift_1M.txt
+
     ################
     cd $subject_dwi_dir
     transformcalc diff2struct_mrtrix.txt invert struct2diff_mrtrix.txt

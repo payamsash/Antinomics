@@ -1,61 +1,68 @@
 #!/bin/bash
 set -e
 
-subject="asjt"
-subject_mrtrix_dir="/Users/payamsadeghishabestari/temp_folder/dti/$subject"
-mkdir -p $subject_mrtrix_dir/report
-echo ">>> Generating QC snapshots..."
+# Base directory containing all subjects
+base_dir="/Volumes/G_USZ_ORL$/Research/ANTINOMICS/payam/subjects_mrtrix_dir"
 
-capture_scene () {
-    local base=$1
-    local main=$2
-    local overlay=$3
-    local mode=$4
+# Loop through each subject folder
+for subject_dir in "$base_dir"/*/; do
+    subject=$(basename "$subject_dir")
+    subject_mrtrix_dir="$base_dir/$subject"
 
-    for plane in 0 1 2; do
-        mrview $main \
-        -overlay.load $overlay \
-        -mode $mode \
-        -plane $plane \
-        -size 1000,800 \
-        -noannotations \
-        -comments false \
-        -voxelinfo false \
-        -colourbar false \
-        -capture.folder $subject_mrtrix_dir/report \
-        -capture.prefix ${base}_plane${plane} \
-        -capture.grab -exit
-    done
-}
+    echo ">>> Processing subject: $subject"
 
-# ----------------------
-# Run each QC step
-# ----------------------
-cd $subject_mrtrix_dir
+    mkdir -p "$subject_mrtrix_dir/report"
+    echo ">>> Generating QC snapshots..."
 
-capture_scene "gm_ribbon" raw_anat.mif vol0.mif 4
-capture_scene "subcortical_gm" raw_anat.mif vol1.mif 4
-capture_scene "wm" raw_anat.mif vol2.mif 4
-capture_scene "csf" raw_anat.mif vol3.mif 4
+    capture_scene () {
+        local base=$1
+        local main=$2
+        local overlay=$3
+        local mode=$4
+        local volume=$5
 
-capture_scene "gmwmi_coreg" mean_b0.mif gmwmSeed_coreg.mif 4
-capture_scene "tian_t1" raw_anat.mif Tian_subcortical.mif 4
-capture_scene "tian_dwi" mean_b0.mif Tian_subcortical_dwi_resampled.mif 4
-capture_scene "subcortical_seed" mean_b0.mif subcortical_gmwmi_raw.mif 4
-capture_scene "exclusion_hull" mean_b0.mif hull_exclude_reg.mif 4
-capture_scene "exclusion_ribbon" mean_b0.mif cortical_ribbon_reg.mif 4
+        for plane in 0 1 2; do
+            mrview "$main" \
+            -overlay.load "$overlay" \
+            -mode "$mode" \
+            -plane "$plane" \
+            -volume "$volume" \
+            -size 1000,800 \
+            -noannotations \
+            -comments false \
+            -voxelinfo false \
+            -colourbar false \
+            -capture.folder "$subject_mrtrix_dir/report" \
+            -capture.prefix "${base}_plane${plane}" \
+            -capture.grab -exit
+        done
+    }
 
-echo ">>> Writing HTML report..."
+    cd "$subject_mrtrix_dir"
 
-# ----------------------
-# Write HTML file
-# ----------------------
-cat > report/qc_report.html <<EOF
+    # ----------------------
+    # Run each QC step
+    # ----------------------
+    capture_scene "gm_ribbon" raw_anat.mif 5tt_nocoreg.mif 4 0
+    capture_scene "subcortical_gm" raw_anat.mif 5tt_nocoreg.mif 4 1
+    capture_scene "wm" raw_anat.mif 5tt_nocoreg.mif 4 2
+    capture_scene "csf" raw_anat.mif 5tt_nocoreg.mif 4 3
+
+    capture_scene "gmwmi_coreg" mean_b0.mif gmwmSeed_coreg.mif 4
+    capture_scene "tian_t1" raw_anat.mif Tian_subcortical.mif 4
+    capture_scene "tian_dwi" mean_b0.mif Tian_subcortical_dwi_resampled.mif 4
+    capture_scene "subcortical_seed" mean_b0.mif subcortical_gmwmi_raw.mif 4
+    capture_scene "exclusion_hull" mean_b0.mif hull_exclude_reg.mif 4
+    capture_scene "exclusion_ribbon" mean_b0.mif cortical_ribbon_reg.mif 4
+
+    echo ">>> Writing HTML report..."
+
+    cat > report/qc_report.html <<EOF
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Tractography QC Report</title>
+  <title>Tractography QC Report - $subject</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
     h2 { margin-top: 40px; }
@@ -65,7 +72,12 @@ cat > report/qc_report.html <<EOF
 </head>
 <body>
 
-<h1>Tractography QC Report</h1>
+<h1>Tractography QC Report - $subject</h1>
+
+EOF
+
+    # append all report sections (reuse same HTML body as before)
+    cat <<'HTML' >> report/qc_report.html
 
 <h2>1. Tissue Type Segmentation (all tissues)</h2>
 
@@ -141,9 +153,12 @@ cat > report/qc_report.html <<EOF
 
 </body>
 </html>
-EOF
+HTML
 
-echo ">>> QC report ready at: $subject_mrtrix_dir/report/qc_report.html"        
+    echo ">>> QC report ready at: $subject_mrtrix_dir/report/qc_report.html"
+    echo "-------------------------------------------------------------"
+done
+      
 
 '''
 ## screenshot tracks

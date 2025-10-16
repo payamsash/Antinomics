@@ -6,66 +6,67 @@ base_dir="/Volumes/G_USZ_ORL$/Research/ANTINOMICS/payam/subjects_mrtrix_dir"
 
 # Loop through each subject folder
 for subject_dir in "$base_dir"/*/; do
-  if [[ "$subject" == "bctw" ]]; then
-    subject=$(basename "$subject_dir")
-    subject_mrtrix_dir="$base_dir/$subject"
+  subject=$(basename "$subject_dir")
+  if [[ "$subject" != "vfav" ]]; then
+    continue
+  fi
+  subject_mrtrix_dir="$base_dir/$subject"
 
-    echo ">>> Processing subject: $subject"
+  echo ">>> Processing subject: $subject"
 
-    mkdir -p "$subject_mrtrix_dir/report"
-    echo ">>> Generating QC snapshots..."
+  mkdir -p "$subject_mrtrix_dir/report"
+  echo ">>> Generating QC snapshots..."
 
-    capture_scene () {
-        local base=$1
-        local main=$2
-        local overlay=$3
-        local mode=$4
+  capture_scene () {
+      local base=$1
+      local main=$2
+      local overlay=$3
+      local mode=$4
 
-        for plane in 0 1 2; do
-            mrview "$main" \
-            -overlay.load "$overlay" \
-            -mode "$mode" \
-            -plane "$plane" \
-            -size 1000,800 \
-            -noannotations \
-            -comments false \
-            -voxelinfo false \
-            -colourbar false \
-            -capture.folder "$subject_mrtrix_dir/report" \
-            -capture.prefix "${base}_plane${plane}" \
-            -capture.grab -exit
-        done
-    }
+      for plane in 0 1 2; do
+          mrview "$main" \
+          -overlay.load "$overlay" \
+          -mode "$mode" \
+          -plane "$plane" \
+          -size 1000,800 \
+          -noannotations \
+          -comments false \
+          -voxelinfo false \
+          -colourbar false \
+          -capture.folder "$subject_mrtrix_dir/report" \
+          -capture.prefix "${base}_plane${plane}" \
+          -capture.grab -exit
+      done
+  }
 
-    cd "$subject_mrtrix_dir"
+  cd "$subject_mrtrix_dir"
 
-    # for i in 0 1 2 3 4; do
-    #     mrconvert 5tt_nocoreg.mif -coord 3 $i vol${i}.mif -force
-    # done
-    # mrcalc vol4.mif 0 -mul vol4_zero.mif -force
+  for i in 0 1 2 3 4; do
+      mrconvert 5tt_nocoreg.mif -coord 3 $i vol${i}.mif -force
+  done
+  mrcalc vol4.mif 0 -mul vol4_zero.mif -force
 
-    # # ----------------------
-    # # Run each QC step
-    # # ----------------------
-    # capture_scene "gm_ribbon" raw_anat.mif vol0.mif 4
-    # capture_scene "subcortical_gm" raw_anat.mif vol1.mif 4
-    # capture_scene "wm" raw_anat.mif vol2.mif 4
-    # capture_scene "csf" raw_anat.mif vol3.mif 4
+  # # ----------------------
+  # # Run each QC step
+  # # ----------------------
+  capture_scene "gm_ribbon" raw_anat.mif vol0.mif 4
+  capture_scene "subcortical_gm" raw_anat.mif vol1.mif 4
+  capture_scene "wm" raw_anat.mif vol2.mif 4
+  capture_scene "csf" raw_anat.mif vol3.mif 4
+  rm vol0.mif vol1.mif vol2.mif vol3.mif vol4.mif vol4_zero.mif
 
-    mrconvert mean_b0.nii.gz mean_b0.mif -force
+  # capture_scene "gmwmi_coreg" mean_b0.nii.gz gmwmSeed_coreg.mif 4
+  # capture_scene "tian_t1" raw_anat.mif Tian_subcortical.mif 4
+  # capture_scene "tian_dwi" mean_b0.nii.gz Tian_subcortical_dwi_resampled.mif 4
+  # capture_scene "subcortical_seed" mean_b0.nii.gz subcortical_gmwmi.mif 4
+  # capture_scene "exclusion_hull" mean_b0.nii.gz hull_exclude_reg.mif 4
+  # capture_scene "exclusion_ribbon" mean_b0.nii.gz cortical_ribbon_reg.mif 4
 
-    # capture_scene "gmwmi_coreg" mean_b0.mif gmwmSeed_coreg.mif 4
-    # capture_scene "tian_t1" raw_anat.mif Tian_subcortical.mif 4
-    capture_scene "tian_dwi" mean_b0.mif Tian_subcortical_dwi_resampled.mif 4
-    capture_scene "subcortical_seed" mean_b0.mif subcortical_gmwmi.mif 4
-    # capture_scene "exclusion_hull" mean_b0.mif hull_exclude_reg.mif 4
-    # capture_scene "exclusion_ribbon" mean_b0.mif cortical_ribbon_reg.mif 4
+  
 
-    rm vol0.mif vol1.mif vol2.mif vol3.mif vol4.mif vol4_zero.mif mean_b0.mif
+  echo ">>> Writing HTML report..."
 
-    echo ">>> Writing HTML report..."
-
-    cat > report/qc_report.html <<EOF
+  cat > report/qc_report.html <<EOF
 
 <!DOCTYPE html>
 <html>
@@ -85,8 +86,8 @@ for subject_dir in "$base_dir"/*/; do
 
 EOF
 
-    # append all report sections (reuse same HTML body as before)
-    cat <<'HTML' >> report/qc_report.html
+  # append all report sections (reuse same HTML body as before)
+  cat <<'HTML' >> report/qc_report.html
 
 <h2>1. Tissue Type Segmentation (all tissues)</h2>
 
@@ -164,42 +165,6 @@ EOF
 </html>
 HTML
 
-    echo ">>> QC report ready at: $subject_mrtrix_dir/report/qc_report.html"
-    echo "-------------------------------------------------------------"
+  echo ">>> QC report ready at: $subject_mrtrix_dir/report/qc_report.html"
+  echo "-------------------------------------------------------------"
 done
-      
-
-'''
-## screenshot tracks
-mrview raw_anat_dwi.mif \
-        -mode 2 \
-        -size 1000,800 \
-        -noannotations \
-        -comments false \
-        -voxelinfo false \
-        -colourbar false \
-        -tractography.geometry points \
-        -tractography.load tracks_subcortical_10M.tck \
-        -capture.prefix example_subcortical \
-        -capture.grab -exit
-
-
-scale=S3
-tck2connectome tracks_subcortical_10M.tck \
-                ../tian/tian_${scale}_dwi.mif \
-                        ./conn/tian_${scale}_conn.csv \
-                        -tck_weights_in sift_subcortical_1M.txt \
-                        -out_assignment ./conn/tian_${scale}_assign.txt \
-                        -symmetric \
-                        -zero_diagonal \
-                        -scale_invnodevol
-'''
-
-connectome2tck tracks_subcortical_10M.tck \
-                    ./conn/tian_S3_assign.txt \
-                    tian_S3_edge_exemplar.tck \
-                    -files single \
-                    -exemplars ../tian/tian_S3_dwi_int.mif
-
-label2mesh ../tian/tian_S3_dwi_int.mif tian_S3_mesh.obj
-meshfilter tian_S3_mesh.obj smooth tian_S3_mesh_smooth.obj

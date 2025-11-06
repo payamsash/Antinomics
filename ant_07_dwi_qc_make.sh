@@ -7,9 +7,9 @@ base_dir="/Volumes/G_USZ_ORL$/Research/ANTINOMICS/payam/subjects_mrtrix_dir"
 # Loop through each subject folder
 for subject_dir in "$base_dir"/*/; do
   subject=$(basename "$subject_dir")
-  if [[ "$subject" != "vfav" ]]; then
-    continue
-  fi
+  # if [[ "$subject" != "vfav" ]]; then
+  #   continue
+  # fi
   subject_mrtrix_dir="$base_dir/$subject"
 
   echo ">>> Processing subject: $subject"
@@ -41,21 +41,21 @@ for subject_dir in "$base_dir"/*/; do
 
   cd "$subject_mrtrix_dir"
 
-  for i in 0 1 2 3 4; do
-      mrconvert 5tt_nocoreg.mif -coord 3 $i vol${i}.mif -force
-  done
-  mrcalc vol4.mif 0 -mul vol4_zero.mif -force
+  # for i in 0 1 2 3 4; do
+  #     mrconvert 5tt_nocoreg.mif -coord 3 $i vol${i}.mif -force
+  # done
+  # mrcalc vol4.mif 0 -mul vol4_zero.mif -force
 
-  # # ----------------------
-  # # Run each QC step
-  # # ----------------------
-  capture_scene "gm_ribbon" raw_anat.mif vol0.mif 4
-  capture_scene "subcortical_gm" raw_anat.mif vol1.mif 4
-  capture_scene "wm" raw_anat.mif vol2.mif 4
-  capture_scene "csf" raw_anat.mif vol3.mif 4
-  rm vol0.mif vol1.mif vol2.mif vol3.mif vol4.mif vol4_zero.mif
+  # # # ----------------------
+  # # # Run each QC step
+  # # # ----------------------
+  # capture_scene "gm_ribbon" raw_anat.mif vol0.mif 4
+  # capture_scene "subcortical_gm" raw_anat.mif vol1.mif 4
+  # capture_scene "wm" raw_anat.mif vol2.mif 4
+  # capture_scene "csf" raw_anat.mif vol3.mif 4
+  # rm vol0.mif vol1.mif vol2.mif vol3.mif vol4.mif vol4_zero.mif
 
-  # capture_scene "gmwmi_coreg" mean_b0.nii.gz gmwmSeed_coreg.mif 4
+  capture_scene "gmwmi_coreg" mean_b0.nii.gz gmwmSeed_coreg.mif 4
   # capture_scene "tian_t1" raw_anat.mif Tian_subcortical.mif 4
   # capture_scene "tian_dwi" mean_b0.nii.gz Tian_subcortical_dwi_resampled.mif 4
   # capture_scene "subcortical_seed" mean_b0.nii.gz subcortical_gmwmi.mif 4
